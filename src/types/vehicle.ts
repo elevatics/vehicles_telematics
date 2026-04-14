@@ -1,0 +1,43 @@
+export type VehicleStatus = 'online' | 'idle' | 'offline';
+
+export interface Vehicle {
+  id: string;
+  deviceId: number;
+  protocol: string;
+  name: string;
+  plateNumber: string;
+  driver: string;
+  status: VehicleStatus;
+  location: {
+    lat: number;
+    lng: number;
+    address: string;
+  };
+  speed: number;
+  serverTime: string;
+  deviceTime: string;
+  fixTime: string;
+  lastUpdate: string;
+  fuelLevel: number;
+  odometer: number;
+  outdated: boolean;
+  valid: boolean;
+  altitude: number;
+  course: number;
+  accuracy: number;
+  network?: string;
+  geofenceIds?: string;
+  tripOdometer: number;
+  fuelConsumption: number;
+  ignition: boolean;
+  statusCode: number;
+  coolantTemp?: number;
+  mapIntake?: number;
+  rpm?: number;
+  obdSpeed?: number;
+  intakeTemp?: number;
+  fuel: number;
+  distance: number;
+  totalDistance: number;
+  motion: boolean;
+}
