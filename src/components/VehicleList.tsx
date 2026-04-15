@@ -35,46 +35,46 @@ const VehicleList = ({
   };
 
   return (
-    <div className="h-full flex flex-col bg-card border-l border-border">
-      <div className="p-4 border-b border-border bg-card">
-        <h2 className="text-xl font-bold text-card-foreground mb-4">Fleet Overview</h2>
-        
-        <div className="grid grid-cols-2 gap-2 mb-4">
-          <Button
-            variant={filterStatus === 'all' ? 'default' : 'outline'}
-            className="justify-start"
-            onClick={() => onFilterChange('all')}
-          >
-            <span className="font-semibold">All</span>
-            <span className="ml-auto text-xs">{statusCounts.all}</span>
-          </Button>
-          <Button
-            variant={filterStatus === 'online' ? 'default' : 'outline'}
-            className="justify-start"
-            onClick={() => onFilterChange('online')}
-          >
-            <div className="h-2 w-2 rounded-full bg-[hsl(var(--status-online))] mr-2" />
-            <span>Online</span>
-            <span className="ml-auto text-xs">{statusCounts.online}</span>
-          </Button>
-          <Button
-            variant={filterStatus === 'idle' ? 'default' : 'outline'}
-            className="justify-start"
-            onClick={() => onFilterChange('idle')}
-          >
-            <div className="h-2 w-2 rounded-full bg-[hsl(var(--status-idle))] mr-2" />
-            <span>Idle</span>
-            <span className="ml-auto text-xs">{statusCounts.idle}</span>
-          </Button>
-          <Button
-            variant={filterStatus === 'offline' ? 'default' : 'outline'}
-            className="justify-start"
-            onClick={() => onFilterChange('offline')}
-          >
-            <div className="h-2 w-2 rounded-full bg-[hsl(var(--status-offline))] mr-2" />
-            <span>Offline</span>
-            <span className="ml-auto text-xs">{statusCounts.offline}</span>
-          </Button>
+    <div className="h-full flex flex-col bg-card">
+      <div className="p-4 border-b border-border">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-bold text-foreground tracking-tight">Fleet Overview</h2>
+          <span className="text-xs text-muted-foreground">{vehicles.length} vehicles</span>
+        </div>
+
+        <div className="flex gap-1.5 flex-wrap">
+          {(['all', 'online', 'idle', 'offline'] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => onFilterChange(s)}
+              className={cn(
+                'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-all',
+                filterStatus === s
+                  ? s === 'all'
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : s === 'online'
+                    ? 'bg-green-500 text-white border-green-500'
+                    : s === 'idle'
+                    ? 'bg-yellow-500 text-white border-yellow-500'
+                    : 'bg-muted-foreground text-white border-muted-foreground'
+                  : 'bg-background border-border text-muted-foreground hover:border-primary/50'
+              )}
+            >
+              {s !== 'all' && (
+                <span className={cn(
+                  'w-1.5 h-1.5 rounded-full',
+                  filterStatus === s ? 'bg-white/80' :
+                  s === 'online' ? 'bg-green-500' :
+                  s === 'idle' ? 'bg-yellow-500' : 'bg-muted-foreground/50'
+                )} />
+              )}
+              <span className="capitalize">{s}</span>
+              <span className={cn(
+                'ml-0.5 font-bold',
+                filterStatus === s ? 'opacity-90' : 'opacity-60'
+              )}>{statusCounts[s]}</span>
+            </button>
+          ))}
         </div>
       </div>
 

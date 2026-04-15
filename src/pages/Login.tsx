@@ -30,21 +30,29 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center space-y-2">
-          <div className="flex justify-center mb-2">
-            <div className="p-3 rounded-xl bg-primary/10">
-              <Truck className="h-8 w-8 text-primary" />
+    <div className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden bg-gradient-to-br from-slate-900 via-primary/90 to-slate-800">
+      {/* Background decoration */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-40 -right-40 w-96 h-96 rounded-full bg-primary/20 blur-3xl" />
+        <div className="absolute -bottom-40 -left-40 w-96 h-96 rounded-full bg-blue-500/10 blur-3xl" />
+      </div>
+
+      <Card className="w-full max-w-md relative shadow-2xl border-white/10 bg-background/95 backdrop-blur-md">
+        <CardHeader className="text-center space-y-3 pb-6">
+          <div className="flex justify-center mb-1">
+            <div className="p-4 rounded-2xl bg-primary shadow-lg shadow-primary/30">
+              <Truck className="h-8 w-8 text-white" />
             </div>
           </div>
-          <CardTitle className="text-2xl">Fleet Management Portal</CardTitle>
-          <CardDescription>Sign in to your account to continue</CardDescription>
+          <div>
+            <CardTitle className="text-2xl font-bold tracking-tight">Fleet Management Portal</CardTitle>
+            <CardDescription className="mt-1">Sign in to your account to continue</CardDescription>
+          </div>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email" className="text-sm font-medium">Email address</Label>
               <Input
                 id="email"
                 type="email"
@@ -53,10 +61,11 @@ const Login = () => {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 autoComplete="email"
+                className="h-10"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password" className="text-sm font-medium">Password</Label>
               <Input
                 id="password"
                 type="password"
@@ -65,17 +74,18 @@ const Login = () => {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 autoComplete="current-password"
+                className="h-10"
               />
             </div>
 
             {error && (
-              <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 p-3 rounded-md">
+              <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 border border-destructive/20 p-3 rounded-lg">
                 <AlertCircle className="h-4 w-4 flex-shrink-0" />
                 <span>{error}</span>
               </div>
             )}
 
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button type="submit" className="w-full h-10 font-semibold shadow-sm" disabled={loading}>
               {loading ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -86,8 +96,11 @@ const Login = () => {
               )}
             </Button>
 
-            <div className="text-center text-xs text-muted-foreground pt-2">
-              Default: <span className="font-mono">admin@fleettelematics.com</span> / <span className="font-mono">Admin1234!</span>
+            <div className="text-center text-xs text-muted-foreground pt-1 border-t border-border mt-4">
+              <span className="block mb-1 font-medium text-muted-foreground/70">Demo credentials</span>
+              <span className="font-mono bg-muted px-2 py-0.5 rounded text-[11px]">admin@fleettelematics.com</span>
+              {' / '}
+              <span className="font-mono bg-muted px-2 py-0.5 rounded text-[11px]">Admin1234!</span>
             </div>
           </form>
         </CardContent>

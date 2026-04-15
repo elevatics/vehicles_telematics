@@ -1,4 +1,4 @@
-import { Bell, AlertCircle, CheckCircle, Clock, X } from 'lucide-react';
+import { Bell, AlertCircle, CheckCircle, Clock, Info, MapPin, Wrench, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -8,107 +8,174 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { formatDistanceToNow } from 'date-fns';
-import { useAlerts, useMarkAlertRead, useMarkAllAlertsRead } from '@/hooks/useAlerts';
-import { alertsApi } from '@/services/api';
+import { useTraccarEvents, TraccarEvent } from '@/hooks/useTraccarEvents';
 import { useQueryClient } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
+
+const STORAGE_KEY = 'traccar_read_event_ids';
+
+const EVENT_LABELS: Record<string, string> = {
+  deviceOnline: 'Device Online',
+  deviceOffline: 'Device Offline',
+  deviceUnknown: 'Device Unknown',
+  deviceStopped: 'Device Stopped',
+  deviceMoving: 'Device Moving',
+  deviceOverspeed: 'Overspeed',
+  deviceFuelDrop: 'Fuel Drop',
+  deviceFuelIncrease: 'Fuel Increase',
+  geofenceEnter: 'Geofence Entered',
+  geofenceExit: 'Geofence Exited',
+  alarm: 'Alarm',
+  ignitionOn: 'Ignition On',
+  ignitionOff: 'Ignition Off',
+  maintenance: 'Maintenance',
+  driverChanged: 'Driver Changed',
+};
+
+const getIcon = (type: string) => {
+  if (type === 'deviceOffline' || type === 'alarm')
+    return <AlertCircle className="h-4 w-4 text-red-500" />;
+  if (type === 'deviceOverspeed' || type === 'deviceFuelDrop')
+    return <AlertCircle className="h-4 w-4 text-yellow-500" />;
+  if (type === 'deviceOnline' || type === 'ignitionOn' || type === 'ignitionOff')
+    return <CheckCircle className="h-4 w-4 text-green-500" />;
+  if (type === 'geofenceEnter' || type === 'geofenceExit')
+    return <MapPin className="h-4 w-4 text-blue-500" />;
+  if (type === 'maintenance')
+    return <Wrench className="h-4 w-4 text-orange-500" />;
+  if (type === 'driverChanged')
+    return <Info className="h-4 w-4 text-purple-500" />;
+  return <Clock className="h-4 w-4 text-muted-foreground" />;
+};
+
+const getLabel = (event: TraccarEvent): string => {
+  const base = EVENT_LABELS[event.type] ?? event.type;
+  if (event.type === 'alarm' && event.attributes?.alarm) {
+    return `Alarm: ${String(event.attributes.alarm)}`;
+  }
+  return base;
+};
+
+const loadReadIds = (): Set<number> => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? new Set<number>(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
+  }
+};
+
+const saveReadIds = (ids: Set<number>) => {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify([...ids]));
+};
 
 const NotificationBell = () => {
-  const { data: alerts = [] } = useAlerts();
-  const markRead = useMarkAlertRead();
-  const markAllRead = useMarkAllAlertsRead();
+  const { data: events = [], isLoading, refetch } = useTraccarEvents();
   const qc = useQueryClient();
+  const [readIds, setReadIds] = useState<Set<number>>(loadReadIds);
 
-  const unreadCount = alerts.filter(a => !a.read).length;
+  const sorted = [...events].sort(
+    (a, b) => new Date(b.eventTime).getTime() - new Date(a.eventTime).getTime()
+  );
 
-  const deleteAlert = async (id: string) => {
-    await alertsApi.delete(id);
-    qc.invalidateQueries({ queryKey: ['alerts'] });
-  };
+  const unreadCount = sorted.filter(e => !readIds.has(e.id)).length;
 
-  const getIcon = (type: string, severity?: string) => {
-    if (type === 'alert' && severity === 'high') {
-      return <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400" />;
-    }
-    if (type === 'alert' && severity === 'medium') {
-      return <AlertCircle className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />;
-    }
-    if (type === 'status' || type === 'info') {
-      return <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />;
-    }
-    return <Clock className="h-4 w-4 text-blue-600 dark:text-blue-400" />;
+  useEffect(() => {
+    saveReadIds(readIds);
+  }, [readIds]);
+
+  const markAllRead = () => {
+    const next = new Set(readIds);
+    events.forEach(e => next.add(e.id));
+    setReadIds(next);
   };
 
   return (
     <Popover>
       <PopoverTrigger asChild>
         <Button variant="ghost" size="icon" className="relative">
-          <Bell className="h-5 w-5" />
+          <Bell className="h-6 w-6" />
           {unreadCount > 0 && (
-            <Badge 
-              className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs"
+            <Badge
+              className="absolute -top-1 -right-1 h-6 w-6 flex items-center justify-center p-0 text-xs"
               variant="destructive"
             >
-              {unreadCount}
+              {unreadCount > 99 ? '99+' : unreadCount}
             </Badge>
           )}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-96 p-0" align="end">
         <div className="flex items-center justify-between p-4 border-b border-border">
-          <h3 className="font-semibold text-foreground">Notifications</h3>
-          {unreadCount > 0 && (
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={() => markAllRead.mutate()}
-              className="text-xs text-primary hover:text-primary"
+          <div>
+            <h3 className="font-semibold text-foreground">Events</h3>
+            <p className="text-xs text-muted-foreground">
+              {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up'} · {events.length} total
+            </p>
+          </div>
+          <div className="flex items-center gap-1">
+            {unreadCount > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs h-7 px-2 text-primary hover:text-primary"
+                onClick={markAllRead}
+              >
+                Mark all read
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => { refetch(); qc.invalidateQueries({ queryKey: ['traccar-events'] }); }}
+              title="Refresh"
             >
-              Mark all as read
+              <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
             </Button>
-          )}
+          </div>
         </div>
         <ScrollArea className="h-96">
-          {alerts.length === 0 ? (
+          {sorted.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-              <Bell className="h-12 w-12 mb-2 opacity-50" />
-              <p className="text-sm">No notifications</p>
+              <Bell className="h-10 w-10 mb-2 opacity-40" />
+              <p className="text-sm">{isLoading ? 'Loading events…' : 'No events'}</p>
             </div>
           ) : (
             <div className="divide-y divide-border">
-              {alerts.map((alert) => (
-                <div
-                  key={alert.id}
-                  className={`p-4 transition-colors hover:bg-accent/50 ${
-                    !alert.read ? 'bg-primary/5' : ''
-                  }`}
-                  onClick={() => !alert.read && markRead.mutate(alert.id)}
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="mt-0.5">
-                      {getIcon(alert.type, alert.severity)}
+              {sorted.map((event) => {
+                const isUnread = !readIds.has(event.id);
+                return (
+                  <div
+                    key={event.id}
+                    className={`p-3 transition-colors cursor-pointer hover:bg-accent/50 ${isUnread ? 'bg-primary/5' : ''}`}
+                    onClick={() => {
+                      if (isUnread) setReadIds(prev => new Set([...prev, event.id]));
+                    }}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 shrink-0">{getIcon(event.type)}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className={`text-sm leading-snug ${isUnread ? 'font-semibold' : 'font-medium'}`}>
+                            {event.deviceName ?? `Device #${event.deviceId}`}
+                          </p>
+                          {isUnread && (
+                            <span className="inline-block h-2 w-2 rounded-full bg-primary shrink-0" />
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {getLabel(event)}
+                          {event.geofenceId ? ` · Geofence #${event.geofenceId}` : ''}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {formatDistanceToNow(new Date(event.eventTime), { addSuffix: true })}
+                        </p>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-sm ${!alert.read ? 'font-medium' : ''}`}>
-                        {alert.message}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {formatDistanceToNow(new Date(alert.created_at), { addSuffix: true })}
-                      </p>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 shrink-0"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteAlert(alert.id);
-                      }}
-                    >
-                      <X className="h-3 w-3" />
-                    </Button>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </ScrollArea>

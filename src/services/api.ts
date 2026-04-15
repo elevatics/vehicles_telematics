@@ -25,6 +25,7 @@ const request = async <T>(path: string, options: RequestInit = {}): Promise<T> =
     throw new Error(err.error || `API error ${res.status}`);
   }
 
+  if (res.status === 204) return undefined as unknown as T;
   return res.json() as Promise<T>;
 };
 
@@ -78,6 +79,51 @@ export const driversApi = {
     request<unknown>(`/api/drivers/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   delete: (id: string) =>
     request<unknown>(`/api/drivers/${id}`, { method: 'DELETE' }),
+};
+
+// ── Traccar Drivers (direct Traccar CRUD) ─────────────────────────────────────
+
+export interface TraccarDriver {
+  id: number;
+  name: string;
+  uniqueId: string;
+  attributes?: Record<string, unknown>;
+}
+
+export const traccarDriversApi = {
+  getAll: () => request<TraccarDriver[]>('/api/driverlists'),
+  create: (body: { name: string; uniqueId: string; attributes?: Record<string, unknown> }) =>
+    request<TraccarDriver>('/api/driverlists', { method: 'POST', body: JSON.stringify(body) }),
+  update: (id: number, body: { name: string; uniqueId: string; attributes?: Record<string, unknown> }) =>
+    request<TraccarDriver>(`/api/driverlists/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  delete: (id: number) =>
+    request(`/api/driverlists/${id}`, { method: 'DELETE' }),
+};
+
+// ── Traccar Events ────────────────────────────────────────────────────────────
+
+export interface TraccarEvent {
+  id: number;
+  type: string;
+  eventTime: string;
+  deviceId: number;
+  deviceName?: string;
+  positionId: number;
+  geofenceId?: number;
+  maintenanceId?: number;
+  attributes: Record<string, unknown>;
+}
+
+export const traccarEventsApi = {
+  getAll: (params?: { deviceId?: number; from?: string; to?: string; type?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.deviceId) q.set('deviceId', String(params.deviceId));
+    if (params?.from) q.set('from', params.from);
+    if (params?.to) q.set('to', params.to);
+    if (params?.type) q.set('type', params.type);
+    const qs = q.toString();
+    return request<TraccarEvent[]>(`/api/events${qs ? `?${qs}` : ''}`);
+  },
 };
 
 // ── Maintenance ───────────────────────────────────────────────────────────────
@@ -169,10 +215,40 @@ export const tripsApi = {
   },
 };
 
+// ── Commands ──────────────────────────────────────────────────────────────────
+
+export interface SendCommandPayload {
+  deviceId: number;
+  type: 'custom' | 'sendSms' | 'message' | 'engineStop' | 'engineResume' | 'positionSingle';
+  attributes?: Record<string, unknown>;
+}
+
+export const commandsApi = {
+  send: (body: SendCommandPayload) =>
+    request<unknown>('/api/commands/send', { method: 'POST', body: JSON.stringify(body) }),
+  getTypes: (deviceId: number) =>
+    request<{ type: string }[]>(`/api/commands/types?deviceId=${deviceId}`),
+};
+
 // ── Geofences ─────────────────────────────────────────────────────────────────
 
+export interface TraccarGeofence {
+  id: number;
+  name: string;
+  description?: string;
+  area: string;
+  calendarId?: number;
+  attributes?: Record<string, unknown>;
+}
+
 export const geofencesApi = {
-  getAll: () => request<unknown[]>('/api/geofences'),
+  getAll: () => request<TraccarGeofence[]>('/api/geofences'),
+  create: (body: { name: string; description?: string; area: string; attributes?: Record<string, unknown> }) =>
+    request<TraccarGeofence>('/api/geofences', { method: 'POST', body: JSON.stringify(body) }),
+  update: (id: number, body: { name: string; description?: string; area: string; attributes?: Record<string, unknown> }) =>
+    request<TraccarGeofence>(`/api/geofences/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  delete: (id: number) =>
+    request(`/api/geofences/${id}`, { method: 'DELETE' }),
 };
 
 // ── Reports ───────────────────────────────────────────────────────────────────

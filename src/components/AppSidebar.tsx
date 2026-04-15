@@ -55,17 +55,16 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="border-b border-sidebar-border p-4">
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm flex-shrink-0">
             <Map className="h-5 w-5" />
           </div>
-          {!collapsed &&
-          <div className="flex flex-col">
-              <span className="text-sm font-semibold">Turet Telematics
-
-            </span>
-              <span className="text-xs text-muted-foreground">GPS Tracking</span>
-            </div>}
+          {!collapsed && (
+            <div className="flex flex-col min-w-0">
+              <span className="text-sm font-bold tracking-tight leading-tight">Turet Telematics</span>
+              <span className="text-[11px] text-muted-foreground">GPS Tracking</span>
+            </div>
+          )}
         </div>
       </SidebarHeader>
 

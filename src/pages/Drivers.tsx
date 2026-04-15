@@ -1,527 +1,215 @@
 import { useState } from "react";
-import { Users, BarChart3, Car, FileText, Trophy, Phone, MessageSquare, UserPlus, Mail, MapPin, Clock, CheckCircle, AlertCircle, Search } from "lucide-react";
+import { Users, Trophy, UserPlus, Search, Loader2, WifiOff, Trash2, Pencil, IdCard } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
+import {
+  useTraccarDrivers,
+  useCreateTraccarDriver,
+  useUpdateTraccarDriver,
+  useDeleteTraccarDriver,
+  TraccarDriver,
+} from "@/hooks/useDrivers";
+
+const BLANK_FORM = { name: '', uniqueId: '' };
 
 export default function Drivers() {
   const [currentView, setCurrentView] = useState("list");
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedDriver, setSelectedDriver] = useState<string | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [editDriver, setEditDriver] = useState<TraccarDriver | null>(null);
+  const [form, setForm] = useState(BLANK_FORM);
 
-  // Mock data
-  const drivers = [
-    { 
-      id: "D001", 
-      name: "John Doe", 
-      phone: "+1-555-0101", 
-      email: "john@fleet.com",
-      vehicle: "VH-001",
-      status: "active",
-      score: 92,
-      trips: 145,
-      rating: 4.8,
-      license: "DL-123456",
-      experience: "5 years",
-      avatar: ""
-    },
-    { 
-      id: "D002", 
-      name: "Jane Smith", 
-      phone: "+1-555-0102", 
-      email: "jane@fleet.com",
-      vehicle: "VH-003",
-      status: "active",
-      score: 88,
-      trips: 132,
-      rating: 4.6,
-      license: "DL-789012",
-      experience: "3 years",
-      avatar: ""
-    },
-    { 
-      id: "D003", 
-      name: "Mike Johnson", 
-      phone: "+1-555-0103", 
-      email: "mike@fleet.com",
-      vehicle: "VH-002",
-      status: "inactive",
-      score: 95,
-      trips: 198,
-      rating: 4.9,
-      license: "DL-345678",
-      experience: "7 years",
-      avatar: ""
-    },
-    { 
-      id: "D004", 
-      name: "Sarah Lee", 
-      phone: "+1-555-0104", 
-      email: "sarah@fleet.com",
-      vehicle: "VH-004",
-      status: "active",
-      score: 85,
-      trips: 87,
-      rating: 4.5,
-      license: "DL-901234",
-      experience: "2 years",
-      avatar: ""
-    },
-  ];
-
-  const documents = [
-    { type: "Driver's License", status: "valid", expiry: "2026-12-31" },
-    { type: "Insurance", status: "valid", expiry: "2025-06-30" },
-    { type: "Medical Certificate", status: "expiring", expiry: "2025-11-15" },
-    { type: "Background Check", status: "valid", expiry: "2026-03-20" },
-  ];
-
-  const leaderboard = [...drivers].sort((a, b) => b.score - a.score);
+  const { data: drivers = [], isLoading, isError } = useTraccarDrivers();
+  const createDriver = useCreateTraccarDriver();
+  const updateDriver = useUpdateTraccarDriver();
+  const deleteDriver = useDeleteTraccarDriver();
 
   const filteredDrivers = drivers.filter(driver =>
     driver.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    driver.id.toLowerCase().includes(searchQuery.toLowerCase())
+    driver.uniqueId.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleSendMessage = (driverId: string, driverName: string) => {
-    toast.success(`Message dialog opened for ${driverName}`);
+  const getInitials = (name: string) =>
+    name.split(' ').map(n => n[0]).join('').toUpperCase();
+
+  const openAdd = () => { setForm(BLANK_FORM); setAddOpen(true); };
+
+  const openEdit = (driver: TraccarDriver) => {
+    setEditDriver(driver);
+    setForm({ name: driver.name, uniqueId: driver.uniqueId });
   };
 
-  const handleAssignTrip = (driverId: string, driverName: string) => {
-    toast.success(`Trip assignment dialog opened for ${driverName}`);
+  const handleAdd = async () => {
+    if (!form.name.trim() || !form.uniqueId.trim()) {
+      toast.error('Name and Unique ID are required');
+      return;
+    }
+    try {
+      await createDriver.mutateAsync(form);
+      toast.success(`Driver "${form.name}" created in Traccar`);
+      setAddOpen(false);
+      setForm(BLANK_FORM);
+    } catch (e: unknown) {
+      toast.error((e as Error).message || 'Failed to create driver');
+    }
   };
 
-  const getInitials = (name: string) => {
-    return name.split(' ').map(n => n[0]).join('').toUpperCase();
+  const handleEdit = async () => {
+    if (!editDriver) return;
+    if (!form.name.trim() || !form.uniqueId.trim()) {
+      toast.error('Name and Unique ID are required');
+      return;
+    }
+    try {
+      await updateDriver.mutateAsync({ id: editDriver.id, ...form });
+      toast.success(`Driver "${form.name}" updated`);
+      setEditDriver(null);
+    } catch (e: unknown) {
+      toast.error((e as Error).message || 'Failed to update driver');
+    }
   };
+
+  const handleDelete = async (driver: TraccarDriver) => {
+    if (!confirm(`Delete driver "${driver.name}" from Traccar?`)) return;
+    try {
+      await deleteDriver.mutateAsync(driver.id);
+      toast.success(`"${driver.name}" deleted`);
+    } catch (e: unknown) {
+      toast.error((e as Error).message || 'Failed to delete driver');
+    }
+  };
+
+  const formFields = (
+    <div className="space-y-4 py-2">
+      <div className="space-y-2">
+        <Label>Full Name *</Label>
+        <Input
+          value={form.name}
+          onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+          placeholder="John Smith"
+        />
+      </div>
+      <div className="space-y-2">
+        <Label>Unique ID *</Label>
+        <Input
+          value={form.uniqueId}
+          onChange={e => setForm(p => ({ ...p, uniqueId: e.target.value }))}
+          placeholder="e.g. DRV001 or iButton ID"
+        />
+        <p className="text-xs text-muted-foreground">
+          This ID must match what the device sends as <code>driverUniqueId</code> (iButton/RFID), or any unique string.
+        </p>
+      </div>
+    </div>
+  );
 
   return (
     <div className="p-6 space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h2 className="text-3xl font-bold">Driver Management</h2>
-          <p className="text-muted-foreground">Manage drivers and track performance</p>
+          <h2 className="text-3xl font-medium">Driver Management</h2>
+          {/* <p className="text-muted-foreground">Manage Traccar drivers — {drivers.length} registered</p> */}
         </div>
-        
         <div className="flex gap-2 items-center">
           <Select value={currentView} onValueChange={setCurrentView}>
-            <SelectTrigger className="w-[200px] bg-background">
+            <SelectTrigger className="w-[180px] bg-background">
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="bg-background z-50">
               <SelectItem value="list">
-                <div className="flex items-center">
-                  <Users className="h-4 w-4 mr-2" />
-                  Driver List
-                </div>
-              </SelectItem>
-              <SelectItem value="performance">
-                <div className="flex items-center">
-                  <BarChart3 className="h-4 w-4 mr-2" />
-                  Performance
-                </div>
-              </SelectItem>
-              <SelectItem value="assignments">
-                <div className="flex items-center">
-                  <Car className="h-4 w-4 mr-2" />
-                  Assignments
-                </div>
-              </SelectItem>
-              <SelectItem value="documents">
-                <div className="flex items-center">
-                  <FileText className="h-4 w-4 mr-2" />
-                  Documents
-                </div>
+                <div className="flex items-center"><Users className="h-4 w-4 mr-2" />Driver List</div>
               </SelectItem>
               <SelectItem value="leaderboard">
-                <div className="flex items-center">
-                  <Trophy className="h-4 w-4 mr-2" />
-                  Leaderboard
-                </div>
-              </SelectItem>
-              <SelectItem value="contacts">
-                <div className="flex items-center">
-                  <Phone className="h-4 w-4 mr-2" />
-                  Contacts
-                </div>
+                <div className="flex items-center"><Trophy className="h-4 w-4 mr-2" />Leaderboard</div>
               </SelectItem>
             </SelectContent>
           </Select>
-          
-          <Button>
+          <Button onClick={openAdd}>
             <UserPlus className="h-4 w-4 mr-2" />
             Add Driver
           </Button>
         </div>
       </div>
 
-      {/* Search Bar */}
-      {(currentView === "list" || currentView === "contacts") && (
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search drivers by name or ID..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10"
-          />
+      {/* Search */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          placeholder="Search by name or unique ID..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="pl-10"
+        />
+      </div>
+
+      {/* Status */}
+      {isLoading && (
+        <div className="flex items-center gap-2 text-sm text-primary">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading Traccar drivers...
+        </div>
+      )}
+      {isError && (
+        <div className="flex items-center gap-2 text-sm text-yellow-600 dark:text-yellow-400">
+          <WifiOff className="h-4 w-4" />
+          Could not reach backend — check Traccar connection
         </div>
       )}
 
       {/* Driver List */}
       {currentView === "list" && (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {filteredDrivers.length === 0 && !isLoading && (
+            <p className="text-muted-foreground col-span-full text-center py-12">
+              No drivers found. Add one via Traccar or the button above.
+            </p>
+          )}
           {filteredDrivers.map(driver => (
             <Card key={driver.id}>
               <CardHeader>
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
-                    <Avatar className="h-12 w-12">
-                      <AvatarImage src={driver.avatar} />
+                    <Avatar className="h-11 w-11">
+                      <AvatarImage src="" />
                       <AvatarFallback>{getInitials(driver.name)}</AvatarFallback>
                     </Avatar>
                     <div>
-                      <CardTitle className="text-lg">{driver.name}</CardTitle>
-                      <CardDescription>{driver.id}</CardDescription>
+                      <CardTitle className="text-base">{driver.name}</CardTitle>
+                      <CardDescription className="flex items-center gap-1 mt-0.5">
+                        <IdCard className="h-3 w-3" />
+                        {driver.uniqueId}
+                      </CardDescription>
                     </div>
                   </div>
-                  <Badge variant={driver.status === "active" ? "default" : "secondary"}>
-                    {driver.status}
-                  </Badge>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">Vehicle</p>
-                    <p className="font-medium">{driver.vehicle}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Performance</p>
-                    <p className="font-medium">{driver.score}/100</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Total Trips</p>
-                    <p className="font-medium">{driver.trips}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Rating</p>
-                    <p className="font-medium">⭐ {driver.rating}</p>
-                  </div>
-                </div>
-                
+              <CardContent>
                 <div className="flex gap-2">
-                  <Dialog>
-                    <DialogTrigger asChild>
-                      <Button size="sm" variant="outline" className="flex-1">
-                        <Users className="h-4 w-4 mr-2" />
-                        Details
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-2xl">
-                      <DialogHeader>
-                        <DialogTitle>Driver Details - {driver.name}</DialogTitle>
-                        <DialogDescription>Complete driver information and performance</DialogDescription>
-                      </DialogHeader>
-                      <div className="space-y-4">
-                        <div className="flex items-center gap-4">
-                          <Avatar className="h-20 w-20">
-                            <AvatarImage src={driver.avatar} />
-                            <AvatarFallback>{getInitials(driver.name)}</AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1">
-                            <h3 className="text-xl font-semibold">{driver.name}</h3>
-                            <p className="text-muted-foreground">{driver.id}</p>
-                            <Badge variant={driver.status === "active" ? "default" : "secondary"} className="mt-1">
-                              {driver.status}
-                            </Badge>
-                          </div>
-                        </div>
-                        
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <Label>Phone</Label>
-                            <p className="text-sm">{driver.phone}</p>
-                          </div>
-                          <div>
-                            <Label>Email</Label>
-                            <p className="text-sm">{driver.email}</p>
-                          </div>
-                          <div>
-                            <Label>License Number</Label>
-                            <p className="text-sm">{driver.license}</p>
-                          </div>
-                          <div>
-                            <Label>Experience</Label>
-                            <p className="text-sm">{driver.experience}</p>
-                          </div>
-                        </div>
-
-                        <div>
-                          <Label>Performance Score</Label>
-                          <div className="flex items-center gap-2 mt-2">
-                            <Progress value={driver.score} className="flex-1" />
-                            <span className="text-sm font-medium">{driver.score}%</span>
-                          </div>
-                        </div>
-                      </div>
-                    </DialogContent>
-                  </Dialog>
-                  
-                  <Button 
-                    size="sm" 
-                    variant="outline"
-                    onClick={() => handleSendMessage(driver.id, driver.name)}
-                  >
-                    <MessageSquare className="h-4 w-4 mr-2" />
-                    Message
-                  </Button>
-                  
-                  <Button 
+                  <Button
                     size="sm"
-                    onClick={() => handleAssignTrip(driver.id, driver.name)}
-                  >
-                    <MapPin className="h-4 w-4 mr-2" />
-                    Assign Trip
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {/* Performance View */}
-      {currentView === "performance" && (
-        <div className="grid gap-4">
-          {drivers.map(driver => (
-            <Card key={driver.id}>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <Avatar>
-                      <AvatarImage src={driver.avatar} />
-                      <AvatarFallback>{getInitials(driver.name)}</AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <CardTitle className="text-lg">{driver.name}</CardTitle>
-                      <CardDescription>{driver.vehicle}</CardDescription>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-2xl font-bold">{driver.score}</div>
-                    <p className="text-xs text-muted-foreground">Efficiency Score</p>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <div className="flex justify-between text-sm mb-2">
-                    <span>Overall Performance</span>
-                    <span className="font-medium">{driver.score}%</span>
-                  </div>
-                  <Progress value={driver.score} />
-                </div>
-                
-                <div className="grid grid-cols-3 gap-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">Total Trips</p>
-                    <p className="text-xl font-semibold">{driver.trips}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Rating</p>
-                    <p className="text-xl font-semibold">{driver.rating}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Status</p>
-                    <Badge variant={driver.status === "active" ? "default" : "secondary"}>
-                      {driver.status}
-                    </Badge>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {/* Assignments View */}
-      {currentView === "assignments" && (
-        <div className="grid gap-4">
-          {drivers.filter(d => d.status === "active").map(driver => (
-            <Card key={driver.id}>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <Avatar>
-                      <AvatarImage src={driver.avatar} />
-                      <AvatarFallback>{getInitials(driver.name)}</AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <CardTitle className="text-lg">{driver.name}</CardTitle>
-                      <CardDescription>{driver.id}</CardDescription>
-                    </div>
-                  </div>
-                  <Badge variant="default">
-                    <Car className="h-3 w-3 mr-1" />
-                    {driver.vehicle}
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-between">
-                  <div className="text-sm">
-                    <p className="text-muted-foreground">Currently assigned to vehicle</p>
-                    <p className="font-medium text-lg">{driver.vehicle}</p>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="outline">
-                      <Car className="h-4 w-4 mr-2" />
-                      Reassign
-                    </Button>
-                    <Button size="sm">
-                      <MapPin className="h-4 w-4 mr-2" />
-                      Assign Trip
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {/* Documents View */}
-      {currentView === "documents" && (
-        <div className="grid gap-4">
-          {drivers.map(driver => (
-            <Card key={driver.id}>
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <Avatar>
-                    <AvatarImage src={driver.avatar} />
-                    <AvatarFallback>{getInitials(driver.name)}</AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <CardTitle className="text-lg">{driver.name}</CardTitle>
-                    <CardDescription>License: {driver.license}</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {documents.map((doc, idx) => (
-                    <div key={idx} className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <FileText className="h-5 w-5 text-muted-foreground" />
-                        <div>
-                          <p className="font-medium text-sm">{doc.type}</p>
-                          <p className="text-xs text-muted-foreground">Expires: {doc.expiry}</p>
-                        </div>
-                      </div>
-                      <Badge variant={doc.status === "valid" ? "default" : "destructive"}>
-                        {doc.status === "valid" && <CheckCircle className="h-3 w-3 mr-1" />}
-                        {doc.status === "expiring" && <AlertCircle className="h-3 w-3 mr-1" />}
-                        {doc.status}
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {/* Leaderboard View */}
-      {currentView === "leaderboard" && (
-        <div className="grid gap-4">
-          <Card className="bg-gradient-to-br from-yellow-500/10 to-yellow-600/10 border-yellow-500/20">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Trophy className="h-6 w-6 text-yellow-500" />
-                Top Performers
-              </CardTitle>
-              <CardDescription>Driver performance rankings</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {leaderboard.map((driver, index) => (
-                  <div key={driver.id} className="flex items-center gap-4 p-3 rounded-lg border bg-background">
-                    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-muted font-bold">
-                      {index === 0 && "🥇"}
-                      {index === 1 && "🥈"}
-                      {index === 2 && "🥉"}
-                      {index > 2 && `#${index + 1}`}
-                    </div>
-                    <Avatar>
-                      <AvatarImage src={driver.avatar} />
-                      <AvatarFallback>{getInitials(driver.name)}</AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1">
-                      <p className="font-semibold">{driver.name}</p>
-                      <p className="text-xs text-muted-foreground">{driver.trips} trips completed</p>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xl font-bold">{driver.score}</div>
-                      <p className="text-xs text-muted-foreground">Score</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Contacts View */}
-      {currentView === "contacts" && (
-        <div className="grid gap-4 md:grid-cols-2">
-          {filteredDrivers.map(driver => (
-            <Card key={driver.id}>
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <Avatar className="h-12 w-12">
-                    <AvatarImage src={driver.avatar} />
-                    <AvatarFallback>{getInitials(driver.name)}</AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <CardTitle className="text-lg">{driver.name}</CardTitle>
-                    <CardDescription>{driver.id}</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex items-center gap-2 text-sm">
-                  <Phone className="h-4 w-4 text-muted-foreground" />
-                  <a href={`tel:${driver.phone}`} className="hover:underline">{driver.phone}</a>
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  <Mail className="h-4 w-4 text-muted-foreground" />
-                  <a href={`mailto:${driver.email}`} className="hover:underline">{driver.email}</a>
-                </div>
-                <div className="flex gap-2 mt-4">
-                  <Button size="sm" variant="outline" className="flex-1" asChild>
-                    <a href={`tel:${driver.phone}`}>
-                      <Phone className="h-4 w-4 mr-2" />
-                      Call
-                    </a>
-                  </Button>
-                  <Button 
-                    size="sm" 
+                    variant="outline"
                     className="flex-1"
-                    onClick={() => handleSendMessage(driver.id, driver.name)}
+                    onClick={() => openEdit(driver)}
                   >
-                    <MessageSquare className="h-4 w-4 mr-2" />
-                    Message
+                    <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                    Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                    onClick={() => handleDelete(driver)}
+                    disabled={deleteDriver.isPending}
+                  >
+                    <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
               </CardContent>
@@ -529,6 +217,85 @@ export default function Drivers() {
           ))}
         </div>
       )}
+
+      {/* Leaderboard View — sorted alphabetically since Traccar has no score */}
+      {currentView === "leaderboard" && (
+        <Card className="bg-gradient-to-br from-yellow-500/10 to-yellow-600/10 border-yellow-500/20">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Trophy className="h-6 w-6 text-yellow-500" />
+              Registered Drivers
+            </CardTitle>
+            <CardDescription>All Traccar drivers, sorted by name</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {[...drivers].sort((a, b) => a.name.localeCompare(b.name)).map((driver, index) => (
+                <div key={driver.id} className="flex items-center gap-4 p-3 rounded-lg border bg-background">
+                  <div className="flex items-center justify-center w-9 h-9 rounded-full bg-muted text-sm font-bold">
+                    {index + 1}
+                  </div>
+                  <Avatar>
+                    <AvatarImage src="" />
+                    <AvatarFallback>{getInitials(driver.name)}</AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold truncate">{driver.name}</p>
+                    <p className="text-xs text-muted-foreground truncate">ID: {driver.uniqueId}</p>
+                  </div>
+                </div>
+              ))}
+              {drivers.length === 0 && !isLoading && (
+                <p className="text-center text-muted-foreground py-8">No drivers registered in Traccar.</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Add Driver Dialog */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Traccar Driver</DialogTitle>
+            <DialogDescription>
+              Creates a new driver directly in Traccar. Devices that send a matching
+              <code className="mx-1 text-xs bg-muted px-1 py-0.5 rounded">driverUniqueId</code>
+              will be linked automatically.
+            </DialogDescription>
+          </DialogHeader>
+          {formFields}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
+            <Button onClick={handleAdd} disabled={createDriver.isPending}>
+              {createDriver.isPending
+                ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                : <UserPlus className="h-4 w-4 mr-2" />}
+              Create Driver
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Driver Dialog */}
+      <Dialog open={!!editDriver} onOpenChange={(open) => { if (!open) setEditDriver(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Driver</DialogTitle>
+            <DialogDescription>Update this driver's details in Traccar.</DialogDescription>
+          </DialogHeader>
+          {formFields}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDriver(null)}>Cancel</Button>
+            <Button onClick={handleEdit} disabled={updateDriver.isPending}>
+              {updateDriver.isPending
+                ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                : <Pencil className="h-4 w-4 mr-2" />}
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -34,12 +34,15 @@ import {
   AlertTriangle,
   CheckCircle2,
   Calendar,
-  User
+  User,
+  Loader2,
+  WifiOff
 } from 'lucide-react';
 import { mockVehicles } from '@/data/mockVehicles';
 import { Vehicle } from '@/types/vehicle';
 import StatusBadge from '@/components/StatusBadge';
 import { useToast } from '@/hooks/use-toast';
+import { useVehicles } from '@/hooks/useVehicles';
 
 type ViewType = 'list' | 'status' | 'health' | 'documents' | 'categories' | 'tags';
 
@@ -52,6 +55,8 @@ export default function Vehicles() {
   const [healthDialogOpen, setHealthDialogOpen] = useState(false);
   const [maintenanceDialogOpen, setMaintenanceDialogOpen] = useState(false);
   const { toast } = useToast();
+  const { data: liveVehicles, isLoading, isError } = useVehicles();
+  const allVehicles: Vehicle[] = liveVehicles ?? mockVehicles;
 
   const viewOptions = [
     { value: 'list' as ViewType, label: 'Vehicle List', icon: Car },
@@ -64,7 +69,7 @@ export default function Vehicles() {
 
   const currentViewLabel = viewOptions.find(opt => opt.value === currentView)?.label || 'Vehicle List';
 
-  const filteredVehicles = mockVehicles.filter(vehicle =>
+  const filteredVehicles = allVehicles.filter(vehicle =>
     vehicle.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     vehicle.plateNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
     vehicle.driver.toLowerCase().includes(searchQuery.toLowerCase())
@@ -315,9 +320,9 @@ export default function Vehicles() {
 
   const renderCategoriesView = () => {
     const categories = {
-      'Electric': mockVehicles.filter((_, i) => i % 3 === 0),
-      'Hybrid': mockVehicles.filter((_, i) => i % 3 === 1),
-      'Gasoline': mockVehicles.filter((_, i) => i % 3 === 2),
+      'Electric': allVehicles.filter((_, i) => i % 3 === 0),
+      'Hybrid': allVehicles.filter((_, i) => i % 3 === 1),
+      'Gasoline': allVehicles.filter((_, i) => i % 3 === 2),
     };
 
     return (
@@ -406,7 +411,21 @@ export default function Vehicles() {
     <div className="p-6 space-y-6">
       <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-bold">Vehicles</h2>
+          <div>
+            <h2 className="text-2xl font-bold">Vehicles</h2>
+            {isLoading && (
+              <div className="flex items-center gap-2 text-xs text-primary mt-1">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Fetching live data...
+              </div>
+            )}
+            {isError && (
+              <div className="flex items-center gap-2 text-xs text-yellow-600 dark:text-yellow-400 mt-1">
+                <WifiOff className="h-3 w-3" />
+                Backend unavailable — showing mock data
+              </div>
+            )}
+          </div>
           <Popover open={viewDropdownOpen} onOpenChange={setViewDropdownOpen}>
             <PopoverTrigger asChild>
               <Button variant="outline" className="w-[200px] justify-between">

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Calendar, Download, Share2, Play, History, BarChart3, User, FileText, Clock, MapPin, AlertTriangle, Camera, Mail, MessageSquare, Bell, ChevronDown, X } from "lucide-react";
+import { useState, useMemo } from "react";
+import { Calendar, Download, Share2, Play, History, BarChart3, User, FileText, Clock, MapPin, AlertTriangle, Camera, Mail, MessageSquare, Bell, ChevronDown, X, Loader2, WifiOff } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
+import { useVehicles } from "@/hooks/useVehicles";
+import { mockVehicles } from "@/data/mockVehicles";
 
 export default function Trips() {
   const [selectedVehicles, setSelectedVehicles] = useState<string[]>([]);
@@ -23,8 +25,9 @@ export default function Trips() {
   const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
   const [currentView, setCurrentView] = useState("active");
 
-  // Mock data
-  const vehicles = ["VH-001", "VH-002", "VH-003", "VH-004", "VH-005"];
+  const { data: liveVehicles, isLoading: vehiclesLoading, isError: vehiclesError } = useVehicles();
+  const allVehicles = liveVehicles ?? mockVehicles;
+  const vehicleOptions = useMemo(() => allVehicles.map(v => ({ id: String(v.id), label: `${v.name} (${v.plateNumber})` })), [allVehicles]);
   const eventOptions = [
     { id: "stops", label: "Show Stops", icon: MapPin },
     { id: "overspeeding", label: "Overspeeding", icon: AlertTriangle },
@@ -160,18 +163,28 @@ export default function Trips() {
                         </Button>
                       )}
                     </div>
-                    {vehicles.map(vehicle => (
-                      <div key={vehicle} className="flex items-center space-x-2">
+                    {vehiclesLoading && (
+                      <div className="flex items-center gap-2 text-xs text-primary py-1">
+                        <Loader2 className="h-3 w-3 animate-spin" />Loading vehicles...
+                      </div>
+                    )}
+                    {vehiclesError && (
+                      <div className="flex items-center gap-2 text-xs text-yellow-600 py-1">
+                        <WifiOff className="h-3 w-3" />Using mock vehicles
+                      </div>
+                    )}
+                    {vehicleOptions.map(vehicle => (
+                      <div key={vehicle.id} className="flex items-center space-x-2">
                         <Checkbox
-                          id={`vehicle-${vehicle}`}
-                          checked={selectedVehicles.includes(vehicle)}
-                          onCheckedChange={() => handleVehicleToggle(vehicle)}
+                          id={`vehicle-${vehicle.id}`}
+                          checked={selectedVehicles.includes(vehicle.id)}
+                          onCheckedChange={() => handleVehicleToggle(vehicle.id)}
                         />
                         <label 
-                          htmlFor={`vehicle-${vehicle}`} 
+                          htmlFor={`vehicle-${vehicle.id}`} 
                           className="text-sm cursor-pointer flex-1"
                         >
-                          {vehicle}
+                          {vehicle.label}
                         </label>
                       </div>
                     ))}
@@ -180,15 +193,18 @@ export default function Trips() {
               </Popover>
               {selectedVehicles.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-2">
-                  {selectedVehicles.map(vehicle => (
-                    <Badge key={vehicle} variant="secondary" className="text-xs">
-                      {vehicle}
-                      <X 
-                        className="h-3 w-3 ml-1 cursor-pointer" 
-                        onClick={() => handleVehicleToggle(vehicle)}
-                      />
-                    </Badge>
-                  ))}
+                  {selectedVehicles.map(vehicleId => {
+                    const v = vehicleOptions.find(o => o.id === vehicleId);
+                    return (
+                      <Badge key={vehicleId} variant="secondary" className="text-xs">
+                        {v?.label ?? vehicleId}
+                        <X 
+                          className="h-3 w-3 ml-1 cursor-pointer" 
+                          onClick={() => handleVehicleToggle(vehicleId)}
+                        />
+                      </Badge>
+                    );
+                  })}
                 </div>
               )}
             </div>
