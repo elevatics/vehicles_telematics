@@ -111,16 +111,16 @@ export default function Drivers() {
   );
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="h-full overflow-y-auto">
+    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-3xl font-medium">Driver Management</h2>
-          {/* <p className="text-muted-foreground">Manage Traccar drivers — {drivers.length} registered</p> */}
+          <h2 className="text-xl sm:text-3xl font-medium">Driver Management</h2>
         </div>
         <div className="flex gap-2 items-center">
           <Select value={currentView} onValueChange={setCurrentView}>
-            <SelectTrigger className="w-[180px] bg-background">
+            <SelectTrigger className="w-[150px] sm:w-[180px] bg-background">
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="bg-background z-50">
@@ -132,9 +132,9 @@ export default function Drivers() {
               </SelectItem>
             </SelectContent>
           </Select>
-          <Button onClick={openAdd}>
-            <UserPlus className="h-4 w-4 mr-2" />
-            Add Driver
+          <Button onClick={openAdd} title="Add Driver">
+            <UserPlus className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Add Driver</span>
           </Button>
         </div>
       </div>
@@ -166,7 +166,7 @@ export default function Drivers() {
 
       {/* Driver List */}
       {currentView === "list" && (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
           {filteredDrivers.length === 0 && !isLoading && (
             <p className="text-muted-foreground col-span-full text-center py-12">
               No drivers found. Add one via Traccar or the button above.
@@ -231,16 +231,16 @@ export default function Drivers() {
           <CardContent>
             <div className="space-y-3">
               {[...drivers].sort((a, b) => a.name.localeCompare(b.name)).map((driver, index) => (
-                <div key={driver.id} className="flex items-center gap-4 p-3 rounded-lg border bg-background">
-                  <div className="flex items-center justify-center w-9 h-9 rounded-full bg-muted text-sm font-bold">
+                <div key={driver.id} className="flex items-center gap-3 p-2.5 sm:p-3 rounded-lg border bg-background">
+                  <div className="flex items-center justify-center w-7 h-7 sm:w-9 sm:h-9 rounded-full bg-muted text-xs sm:text-sm font-bold flex-shrink-0">
                     {index + 1}
                   </div>
-                  <Avatar>
+                  <Avatar className="h-8 w-8 sm:h-10 sm:w-10 flex-shrink-0">
                     <AvatarImage src="" />
-                    <AvatarFallback>{getInitials(driver.name)}</AvatarFallback>
+                    <AvatarFallback className="text-xs">{getInitials(driver.name)}</AvatarFallback>
                   </Avatar>
                   <div className="flex-1 min-w-0">
-                    <p className="font-semibold truncate">{driver.name}</p>
+                    <p className="font-semibold truncate text-sm">{driver.name}</p>
                     <p className="text-xs text-muted-foreground truncate">ID: {driver.uniqueId}</p>
                   </div>
                 </div>
@@ -255,7 +255,7 @@ export default function Drivers() {
 
       {/* Add Driver Dialog */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="w-[95vw] max-w-md">
           <DialogHeader>
             <DialogTitle>Add Traccar Driver</DialogTitle>
             <DialogDescription>
@@ -279,7 +279,7 @@ export default function Drivers() {
 
       {/* Edit Driver Dialog */}
       <Dialog open={!!editDriver} onOpenChange={(open) => { if (!open) setEditDriver(null); }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="w-[95vw] max-w-md">
           <DialogHeader>
             <DialogTitle>Edit Driver</DialogTitle>
             <DialogDescription>Update this driver's details in Traccar.</DialogDescription>
@@ -296,6 +296,7 @@ export default function Drivers() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
     </div>
   );
 }

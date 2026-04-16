@@ -1,8 +1,8 @@
 export type VehicleStatus = 'online' | 'idle' | 'offline';
 
 export interface Vehicle {
-  id: string;
-  deviceId: number;
+  id: number;
+  deviceId: string;
   protocol: string;
   name: string;
   plateNumber: string;

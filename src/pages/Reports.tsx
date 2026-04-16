@@ -400,6 +400,7 @@ export default function Reports() {
   };
 
   return (
+    <div className="h-full overflow-y-auto">
     <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -669,6 +670,7 @@ export default function Reports() {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
     </div>
   );
 }

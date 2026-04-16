@@ -28,7 +28,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             </div>
           </header>
           <div className="h-0.5 bg-gradient-to-r from-primary/80 via-primary to-primary/20 shrink-0" />
-          <main className="flex-1 overflow-auto">
+          <main className="flex-1 overflow-hidden">
             {children}
           </main>
         </SidebarInset>

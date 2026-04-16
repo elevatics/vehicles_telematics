@@ -25,6 +25,7 @@ export default function Settings() {
   };
 
   return (
+    <div className="h-full overflow-y-auto">
     <div className="p-6 max-w-6xl mx-auto">
       <div className="mb-6">
         <h1 className="text-3xl font-bold">Settings</h1>
@@ -330,6 +331,7 @@ export default function Settings() {
           </Card>
         </TabsContent>
       </Tabs>
+    </div>
     </div>
   );
 }

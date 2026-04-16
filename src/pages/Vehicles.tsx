@@ -105,7 +105,7 @@ export default function Vehicles() {
   };
 
   const renderVehicleList = () => (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+    <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
       {filteredVehicles.map((vehicle) => {
         const health = getHealthStatus(vehicle.fuelLevel);
         const HealthIcon = health.icon;
@@ -193,26 +193,26 @@ export default function Vehicles() {
   );
 
   const renderStatusView = () => (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {filteredVehicles.map((vehicle) => (
         <Card key={vehicle.id}>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <Car className="h-8 w-8 text-primary" />
-                <div>
-                  <h4 className="font-semibold">{vehicle.name}</h4>
+          <CardContent className="pt-4 pb-4 px-3 sm:px-6">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-3 min-w-0">
+                <Car className="h-6 w-6 sm:h-8 sm:w-8 text-primary flex-shrink-0" />
+                <div className="min-w-0">
+                  <h4 className="font-semibold truncate">{vehicle.name}</h4>
                   <p className="text-sm text-muted-foreground">{vehicle.plateNumber}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3 sm:gap-4 flex-shrink-0">
                 <div className="text-right">
-                  <div className="text-sm text-muted-foreground">Speed</div>
-                  <div className="font-semibold">{vehicle.speed} km/h</div>
+                  <div className="text-xs text-muted-foreground">Speed</div>
+                  <div className="font-semibold text-sm">{vehicle.speed} km/h</div>
                 </div>
                 <div className="text-right">
-                  <div className="text-sm text-muted-foreground">Fuel</div>
-                  <div className="font-semibold">{vehicle.fuelLevel}%</div>
+                  <div className="text-xs text-muted-foreground">Fuel</div>
+                  <div className="font-semibold text-sm">{vehicle.fuelLevel}%</div>
                 </div>
                 <StatusBadge status={vehicle.status} />
               </div>
@@ -286,7 +286,7 @@ export default function Vehicles() {
             <CardDescription>{vehicle.plateNumber}</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">
               <div className="space-y-1">
                 <div className="text-sm font-medium">Registration</div>
                 <Badge variant="outline" className="text-green-600">
@@ -359,7 +359,7 @@ export default function Vehicles() {
   };
 
   const renderAssetTagsView = () => (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+    <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
       {filteredVehicles.map((vehicle) => (
         <Card key={vehicle.id}>
           <CardHeader>
@@ -372,7 +372,7 @@ export default function Vehicles() {
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Asset ID</span>
-                <span className="font-mono">{vehicle.id.toUpperCase()}</span>
+                <span className="font-mono">{String(vehicle.id).toUpperCase()}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Plate Number</span>
@@ -408,11 +408,11 @@ export default function Vehicles() {
   );
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-between">
+    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 h-full overflow-y-auto">
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-2xl font-bold">Vehicles</h2>
+            <h2 className="text-xl sm:text-2xl font-bold">Vehicles</h2>
             {isLoading && (
               <div className="flex items-center gap-2 text-xs text-primary mt-1">
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -428,7 +428,7 @@ export default function Vehicles() {
           </div>
           <Popover open={viewDropdownOpen} onOpenChange={setViewDropdownOpen}>
             <PopoverTrigger asChild>
-              <Button variant="outline" className="w-[200px] justify-between">
+              <Button variant="outline" className="w-[150px] sm:w-[200px] justify-between text-sm">
                 {currentViewLabel}
                 <ChevronDown className="h-4 w-4 opacity-50" />
               </Button>
@@ -477,7 +477,7 @@ export default function Vehicles() {
 
       {/* Vehicle Details Dialog */}
       <Dialog open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Car className="h-5 w-5" />

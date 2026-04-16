@@ -36,10 +36,11 @@ const menuItems = [
 { title: "Trips", url: "/trips", icon: RouteIcon },
 { title: "Drivers", url: "/drivers", icon: Users },
 { title: "Vehicles", url: "/vehicles", icon: Car },
-{ title: "Maintenance", url: "/maintenance", icon: Wrench },
-{ title: "Reports", url: "/reports", icon: FileText },
-{ title: "Finance", url: "/finance", icon: DollarSign },
-{ title: "Settings", url: "/settings", icon: Settings }];
+// { title: "Maintenance", url: "/maintenance", icon: Wrench },
+// { title: "Reports", url: "/reports", icon: FileText },
+// { title: "Finance", url: "/finance", icon: DollarSign },
+// { title: "Settings", url: "/settings", icon: Settings }
+];
 
 
 export function AppSidebar() {
@@ -97,10 +98,10 @@ export function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton asChild tooltip="Profile">
-              <NavLink to="/profile">
+              {/* <NavLink to="/profile">
                 <User className="h-4 w-4" />
                 <span>Profile</span>
-              </NavLink>
+              </NavLink> */}
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>

@@ -126,6 +126,28 @@ export const traccarEventsApi = {
   },
 };
 
+// ── Positions ─────────────────────────────────────────────────────────────────
+
+export interface TraccarPosition {
+  id: number;
+  deviceId: number;
+  serverTime: string;
+  deviceTime: string;
+  fixTime: string;
+  latitude: number;
+  longitude: number;
+  altitude: number;
+  speed: number;
+  course: number;
+  accuracy: number;
+  attributes: Record<string, unknown>;
+}
+
+export const positionsApi = {
+  getHistory: (deviceId: number, from: string, to: string) =>
+    request<TraccarPosition[]>(`/api/positions?deviceId=${deviceId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+};
+
 // ── Maintenance ───────────────────────────────────────────────────────────────
 
 export interface MaintenanceFilters {

@@ -635,6 +635,7 @@ export default function Maintenance() {
   };
 
   return (
+    <div className="h-full overflow-y-auto">
     <div className="p-6 space-y-6">
       <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between flex-wrap gap-4">
@@ -910,6 +911,7 @@ export default function Maintenance() {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
     </div>
   );
 }

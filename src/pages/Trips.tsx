@@ -1,7 +1,7 @@
-import { useState, useMemo } from "react";
-import { Calendar, Download, Share2, Play, History, BarChart3, User, FileText, Clock, MapPin, AlertTriangle, Camera, Mail, MessageSquare, Bell, ChevronDown, X, Loader2, WifiOff } from "lucide-react";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
+import { Download, Share2, Play, History, BarChart3, User, FileText, Clock, MapPin, AlertTriangle, Camera, Mail, MessageSquare, Bell, ChevronDown, X, Loader2, WifiOff, Navigation, Gauge, Fuel, Route } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -10,14 +10,161 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { useVehicles } from "@/hooks/useVehicles";
+import { usePositionHistory, TraccarPosition } from "@/hooks/usePositionHistory";
 import { mockVehicles } from "@/data/mockVehicles";
+import { subHours, subDays, startOfDay, format } from "date-fns";
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
+
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string;
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+function getTimeRange(range: string, customFrom?: string, customTo?: string): { from: string; to: string } {
+  const now = new Date();
+  const map: Record<string, Date> = {
+    today:  startOfDay(now),
+    hour:   subHours(now, 1),
+    day:    subHours(now, 24),
+    week:   subDays(now, 7),
+    month:  subDays(now, 30),
+  };
+  if (range === "custom" && customFrom && customTo) {
+    return { from: new Date(customFrom).toISOString(), to: new Date(customTo).toISOString() };
+  }
+  return { from: (map[range] ?? subHours(now, 24)).toISOString(), to: now.toISOString() };
+}
+
+interface TripSegment {
+  vehicleId: number;
+  vehicleName: string;
+  plateNumber: string;
+  driver: string;
+  positions: TraccarPosition[];
+  startTime: string;
+  endTime: string;
+  durationMin: number;
+  distanceKm: number;
+  avgSpeedKmh: number;
+  maxSpeedKmh: number;
+  stopCount: number;
+}
+
+function buildTrips(positions: TraccarPosition[], gapMinutes = 10): TripSegment[] {
+  if (positions.length === 0) return [];
+  const sorted = [...positions].sort((a, b) => new Date(a.fixTime).getTime() - new Date(b.fixTime).getTime());
+  const segments: TraccarPosition[][] = [];
+  let current: TraccarPosition[] = [sorted[0]];
+  for (let i = 1; i < sorted.length; i++) {
+    const gap = (new Date(sorted[i].fixTime).getTime() - new Date(sorted[i - 1].fixTime).getTime()) / 60000;
+    if (gap > gapMinutes) { segments.push(current); current = []; }
+    current.push(sorted[i]);
+  }
+  if (current.length > 0) segments.push(current);
+  return segments
+    .filter(s => s.length >= 2)
+    .map(s => {
+      const start = new Date(s[0].fixTime);
+      const end = new Date(s[s.length - 1].fixTime);
+      const durationMin = (end.getTime() - start.getTime()) / 60000;
+      let distanceKm = 0;
+      for (let i = 1; i < s.length; i++) {
+        const R = 6371;
+        const dLat = (s[i].latitude - s[i - 1].latitude) * Math.PI / 180;
+        const dLng = (s[i].longitude - s[i - 1].longitude) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(s[i - 1].latitude * Math.PI / 180) * Math.cos(s[i].latitude * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+        distanceKm += R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      }
+      const speeds = s.map(p => p.speed * 1.852);
+      const stopCount = s.filter(p => p.speed < 1).length;
+      return {
+        vehicleId: s[0].deviceId,
+        vehicleName: "",
+        plateNumber: "",
+        driver: "",
+        positions: s,
+        startTime: start.toISOString(),
+        endTime: end.toISOString(),
+        durationMin,
+        distanceKm,
+        avgSpeedKmh: speeds.reduce((a, b) => a + b, 0) / speeds.length,
+        maxSpeedKmh: Math.max(...speeds),
+        stopCount,
+      };
+    });
+}
+
+function exportCSV(trips: TripSegment[]) {
+  const header = "Vehicle,Plate,Driver,Start,End,Duration (min),Distance (km),Avg Speed (km/h),Max Speed (km/h),Stops";
+  const rows = trips.map(t =>
+    [t.vehicleName, t.plateNumber, t.driver,
+     format(new Date(t.startTime), "yyyy-MM-dd HH:mm"),
+     format(new Date(t.endTime), "yyyy-MM-dd HH:mm"),
+     t.durationMin.toFixed(0), t.distanceKm.toFixed(2),
+     t.avgSpeedKmh.toFixed(1), t.maxSpeedKmh.toFixed(1), t.stopCount].join(",")
+  );
+  const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = "trip_history.csv"; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Route Map component ───────────────────────────────────────────────────────
+
+function RouteMap({ positions }: { positions: TraccarPosition[] }) {
+  const container = useRef<HTMLDivElement>(null);
+  const map = useRef<mapboxgl.Map | null>(null);
+
+  useEffect(() => {
+    if (!container.current || positions.length === 0) return;
+    mapboxgl.accessToken = MAPBOX_TOKEN;
+    map.current = new mapboxgl.Map({
+      container: container.current,
+      style: "mapbox://styles/mapbox/streets-v12",
+      center: [positions[0].longitude, positions[0].latitude],
+      zoom: 11,
+    });
+    map.current.addControl(new mapboxgl.NavigationControl(), "top-right");
+    map.current.once("style.load", () => {
+      const coords: [number, number][] = positions.map(p => [p.longitude, p.latitude]);
+      map.current!.addSource("route", {
+        type: "geojson",
+        data: { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: coords } },
+      });
+      map.current!.addLayer({ id: "route-line", type: "line", source: "route",
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: { "line-color": "#6366f1", "line-width": 3 },
+      });
+      // Start marker
+      new mapboxgl.Marker({ color: "#22c55e" }).setLngLat(coords[0]).addTo(map.current!);
+      // End marker
+      new mapboxgl.Marker({ color: "#ef4444" }).setLngLat(coords[coords.length - 1]).addTo(map.current!);
+      // Fit bounds
+      const bounds = coords.reduce((b, c) => b.extend(c as [number, number]), new mapboxgl.LngLatBounds(coords[0], coords[0]));
+      map.current!.fitBounds(bounds, { padding: 40 });
+    });
+    return () => { map.current?.remove(); };
+  }, [positions]);
+
+  if (positions.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64 text-muted-foreground border rounded-lg bg-muted/20">
+        <div className="text-center"><MapPin className="h-10 w-10 mx-auto mb-2" /><p>No position data for this trip</p></div>
+      </div>
+    );
+  }
+  return <div ref={container} className="w-full h-64 rounded-lg overflow-hidden border" />;
+}
 
 export default function Trips() {
   const [selectedVehicles, setSelectedVehicles] = useState<string[]>([]);
-  const [timeRange, setTimeRange] = useState("today");
-  const [selectedTrip, setSelectedTrip] = useState<string | null>(null);
+  const [timeRange, setTimeRange] = useState("day");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
   const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
   const [selectedStatus, setSelectedStatus] = useState<string[]>([]);
   const [vehicleDropdownOpen, setVehicleDropdownOpen] = useState(false);
@@ -27,7 +174,12 @@ export default function Trips() {
 
   const { data: liveVehicles, isLoading: vehiclesLoading, isError: vehiclesError } = useVehicles();
   const allVehicles = liveVehicles ?? mockVehicles;
-  const vehicleOptions = useMemo(() => allVehicles.map(v => ({ id: String(v.id), label: `${v.name} (${v.plateNumber})` })), [allVehicles]);
+
+  const vehicleOptions = useMemo(() =>
+    allVehicles.map(v => ({ id: String(v.id), numericId: v.id, label: `${v.name} (${v.plateNumber})`, vehicle: v })),
+    [allVehicles]
+  );
+
   const eventOptions = [
     { id: "stops", label: "Show Stops", icon: MapPin },
     { id: "overspeeding", label: "Overspeeding", icon: AlertTriangle },
@@ -35,116 +187,159 @@ export default function Trips() {
     { id: "media", label: "Media Files", icon: Camera },
   ];
   const statusOptions = [
-    { id: "inprogress", label: "In Progress", icon: Play },
-    { id: "completed", label: "Completed", icon: FileText },
-    { id: "lasttrip", label: "Last Trip", icon: History },
-  ];
-  
-  const activeTrips = [
-    { id: "T001", vehicle: "VH-001", driver: "John Doe", origin: "New York", destination: "Boston", status: "In Progress", progress: 65, eta: "2h 15m" },
-    { id: "T002", vehicle: "VH-003", driver: "Jane Smith", origin: "Chicago", destination: "Detroit", status: "In Progress", progress: 40, eta: "3h 30m" },
+    { id: "online", label: "Online / Moving", icon: Play },
+    { id: "idle", label: "Idle", icon: Clock },
+    { id: "offline", label: "Offline", icon: WifiOff },
   ];
 
-  const tripHistory = [
-    { id: "T100", vehicle: "VH-002", driver: "Mike Johnson", date: "2025-10-22", duration: "4h 30m", distance: "250 km", stops: 3, alerts: 2, avgSpeed: "55 km/h" },
-    { id: "T101", vehicle: "VH-001", driver: "John Doe", date: "2025-10-21", duration: "3h 15m", distance: "180 km", stops: 2, alerts: 0, avgSpeed: "58 km/h" },
-    { id: "T102", vehicle: "VH-004", driver: "Sarah Lee", date: "2025-10-21", duration: "5h 00m", distance: "320 km", stops: 4, alerts: 1, avgSpeed: "64 km/h" },
-  ];
+  const { from: rangeFrom, to: rangeTo } = useMemo(
+    () => getTimeRange(timeRange, customFrom, customTo),
+    [timeRange, customFrom, customTo]
+  );
 
-  const handleVehicleToggle = (vehicle: string) => {
-    setSelectedVehicles(prev =>
-      prev.includes(vehicle)
-        ? prev.filter(v => v !== vehicle)
-        : [...prev, vehicle]
-    );
-  };
+  // For history: fetch positions for all selected vehicles (or all if none selected)
+  const targetVehicles = selectedVehicles.length > 0
+    ? vehicleOptions.filter(v => selectedVehicles.includes(v.id))
+    : vehicleOptions;
 
-  const handleEventToggle = (eventId: string) => {
-    setSelectedEvents(prev =>
-      prev.includes(eventId)
-        ? prev.filter(e => e !== eventId)
-        : [...prev, eventId]
-    );
-  };
+  // We fetch position history for up to 5 vehicles at once (to avoid overload)
+  const historyVehicle1 = targetVehicles[0];
+  const historyVehicle2 = targetVehicles[1];
+  const historyVehicle3 = targetVehicles[2];
+  const historyVehicle4 = targetVehicles[3];
+  const historyVehicle5 = targetVehicles[4];
 
-  const handleStatusToggle = (statusId: string) => {
-    setSelectedStatus(prev =>
-      prev.includes(statusId)
-        ? prev.filter(s => s !== statusId)
-        : [...prev, statusId]
-    );
-  };
+  const { data: pos1 = [], isLoading: l1 } = usePositionHistory(historyVehicle1?.numericId ?? null, rangeFrom, rangeTo);
+  const { data: pos2 = [], isLoading: l2 } = usePositionHistory(historyVehicle2?.numericId ?? null, rangeFrom, rangeTo);
+  const { data: pos3 = [], isLoading: l3 } = usePositionHistory(historyVehicle3?.numericId ?? null, rangeFrom, rangeTo);
+  const { data: pos4 = [], isLoading: l4 } = usePositionHistory(historyVehicle4?.numericId ?? null, rangeFrom, rangeTo);
+  const { data: pos5 = [], isLoading: l5 } = usePositionHistory(historyVehicle5?.numericId ?? null, rangeFrom, rangeTo);
+  const historyLoading = l1 || l2 || l3 || l4 || l5;
+
+  // Build trip segments per vehicle
+  const allTrips: TripSegment[] = useMemo(() => {
+    const batches = [
+      { positions: pos1, opt: historyVehicle1 },
+      { positions: pos2, opt: historyVehicle2 },
+      { positions: pos3, opt: historyVehicle3 },
+      { positions: pos4, opt: historyVehicle4 },
+      { positions: pos5, opt: historyVehicle5 },
+    ];
+    return batches.flatMap(({ positions, opt }) => {
+      if (!opt || positions.length === 0) return [];
+      const segs = buildTrips(positions);
+      return segs.map(s => ({
+        ...s,
+        vehicleName: opt.vehicle.name,
+        plateNumber: opt.vehicle.plateNumber,
+        driver: opt.vehicle.driver,
+      }));
+    }).sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+  }, [pos1, pos2, pos3, pos4, pos5]);
+
+  // Filter by status overlay
+  const filteredTrips = useMemo(() => {
+    if (selectedStatus.length === 0) return allTrips;
+    return allTrips;
+  }, [allTrips, selectedStatus]);
+
+  // Active trips from live vehicle data
+  // effectiveStatus: if motion=true treat as "online" regardless of Traccar status field
+  const activeTrips = useMemo(() =>
+    allVehicles
+      .filter(v => {
+        const effectiveStatus = v.motion ? "online" : v.status;
+        if (selectedVehicles.length > 0 && !selectedVehicles.includes(String(v.id))) return false;
+        if (selectedStatus.length > 0 && !selectedStatus.includes(effectiveStatus)) return false;
+        return effectiveStatus === "online" || v.motion;
+      }),
+    [allVehicles, selectedVehicles, selectedStatus]
+  );
+
+  // Analytics aggregates from real position data
+  const analyticsData = useMemo(() => {
+    const byVehicle = new Map<string, { name: string; trips: number; distanceKm: number; avgSpeed: number; speeds: number[] }>();
+    allTrips.forEach(t => {
+      const key = t.vehicleName || String(t.vehicleId);
+      const entry = byVehicle.get(key) ?? { name: key, trips: 0, distanceKm: 0, avgSpeed: 0, speeds: [] };
+      entry.trips++;
+      entry.distanceKm += t.distanceKm;
+      entry.speeds.push(t.avgSpeedKmh);
+      byVehicle.set(key, entry);
+    });
+    return Array.from(byVehicle.values()).map(e => ({
+      name: e.name,
+      trips: e.trips,
+      distance: parseFloat(e.distanceKm.toFixed(1)),
+      avgSpeed: e.speeds.length > 0 ? parseFloat((e.speeds.reduce((a, b) => a + b, 0) / e.speeds.length).toFixed(1)) : 0,
+    }));
+  }, [allTrips]);
+
+  const totalDistance = useMemo(() => allTrips.reduce((s, t) => s + t.distanceKm, 0), [allTrips]);
+  const totalTrips = allTrips.length;
+  const avgSpeed = useMemo(() => {
+    if (allTrips.length === 0) return 0;
+    return allTrips.reduce((s, t) => s + t.avgSpeedKmh, 0) / allTrips.length;
+  }, [allTrips]);
+
+  const handleVehicleToggle = (id: string) =>
+    setSelectedVehicles(prev => prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]);
+  const handleEventToggle = (id: string) =>
+    setSelectedEvents(prev => prev.includes(id) ? prev.filter(e => e !== id) : [...prev, id]);
+  const handleStatusToggle = (id: string) =>
+    setSelectedStatus(prev => prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]);
+
+  const navigate = useNavigate();
 
   const handleDownloadReport = () => {
-    toast.success("Trip report downloaded successfully");
+    if (filteredTrips.length === 0) { toast.error("No trip data to export"); return; }
+    exportCSV(filteredTrips);
+    toast.success(`Exported ${filteredTrips.length} trips to CSV`);
   };
-
-  const handleShareTrip = (method: string) => {
-    toast.success(`Trip history shared via ${method}`);
-  };
+  const handleShareTrip = (method: string) => toast.success(`Trip history shared via ${method}`);
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-4">
+    <div className="h-full overflow-y-auto">
+    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6">
+      {/* Header */}
+      <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-3xl font-bold">Trip Management</h2>
-          <p className="text-muted-foreground">Manage and track vehicle trips</p>
+          <h2 className="text-xl sm:text-3xl font-bold">Trip Management</h2>
+          <p className="text-muted-foreground text-sm">Manage and track vehicle trips</p>
         </div>
-        
         <div className="flex gap-2 items-center">
           <Select value={currentView} onValueChange={setCurrentView}>
-            <SelectTrigger className="w-[200px] bg-background">
+            <SelectTrigger className="w-[160px] sm:w-[200px] bg-background">
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="bg-background z-50">
-              <SelectItem value="active">
-                <div className="flex items-center">
-                  <Play className="h-4 w-4 mr-2" />
-                  Active Trips
-                </div>
-              </SelectItem>
-              <SelectItem value="history">
-                <div className="flex items-center">
-                  <History className="h-4 w-4 mr-2" />
-                  Trip History
-                </div>
-              </SelectItem>
-              <SelectItem value="analytics">
-                <div className="flex items-center">
-                  <BarChart3 className="h-4 w-4 mr-2" />
-                  Trip Analytics
-                </div>
-              </SelectItem>
+              <SelectItem value="active"><div className="flex items-center"><Play className="h-4 w-4 mr-2" />Active Trips</div></SelectItem>
+              <SelectItem value="history"><div className="flex items-center"><History className="h-4 w-4 mr-2" />Trip History</div></SelectItem>
+              <SelectItem value="analytics"><div className="flex items-center"><BarChart3 className="h-4 w-4 mr-2" />Trip Analytics</div></SelectItem>
             </SelectContent>
           </Select>
-          
-          <Button variant="outline" onClick={handleDownloadReport}>
-            <Download className="h-4 w-4 mr-2" />
-            Download Report
+          <Button variant="outline" onClick={handleDownloadReport} title="Download Report">
+            <Download className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Download Report</span>
           </Button>
         </div>
       </div>
 
-      {/* Vehicle & Time Selection */}
+      {/* Filters */}
       <Card>
-        <CardHeader>
-          <CardTitle>Filters</CardTitle>
+        <CardHeader className="pb-3 px-3 sm:px-6">
+          <CardTitle className="text-base">Filters</CardTitle>
           <CardDescription>Select vehicles, time range, and events to filter</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <CardContent className="space-y-3 px-3 sm:px-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {/* Vehicle picker */}
             <div className="space-y-2">
               <Label>Select Vehicles</Label>
               <Popover open={vehicleDropdownOpen} onOpenChange={setVehicleDropdownOpen}>
                 <PopoverTrigger asChild>
                   <Button variant="outline" className="w-full justify-between">
-                    {selectedVehicles.length === 0 ? (
-                      "Select vehicles..."
-                    ) : (
-                      <span className="truncate">
-                        {selectedVehicles.length} vehicle(s) selected
-                      </span>
-                    )}
+                    {selectedVehicles.length === 0 ? "All vehicles" : `${selectedVehicles.length} selected`}
                     <ChevronDown className="h-4 w-4 opacity-50 ml-2 flex-shrink-0" />
                   </Button>
                 </PopoverTrigger>
@@ -153,55 +348,28 @@ export default function Trips() {
                     <div className="flex items-center justify-between mb-2">
                       <p className="text-sm font-medium">Select Vehicles</p>
                       {selectedVehicles.length > 0 && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-auto p-1 text-xs"
-                          onClick={() => setSelectedVehicles([])}
-                        >
-                          Clear all
-                        </Button>
+                        <Button variant="ghost" size="sm" className="h-auto p-1 text-xs" onClick={() => setSelectedVehicles([])}>Clear all</Button>
                       )}
                     </div>
-                    {vehiclesLoading && (
-                      <div className="flex items-center gap-2 text-xs text-primary py-1">
-                        <Loader2 className="h-3 w-3 animate-spin" />Loading vehicles...
-                      </div>
-                    )}
-                    {vehiclesError && (
-                      <div className="flex items-center gap-2 text-xs text-yellow-600 py-1">
-                        <WifiOff className="h-3 w-3" />Using mock vehicles
-                      </div>
-                    )}
-                    {vehicleOptions.map(vehicle => (
-                      <div key={vehicle.id} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`vehicle-${vehicle.id}`}
-                          checked={selectedVehicles.includes(vehicle.id)}
-                          onCheckedChange={() => handleVehicleToggle(vehicle.id)}
-                        />
-                        <label 
-                          htmlFor={`vehicle-${vehicle.id}`} 
-                          className="text-sm cursor-pointer flex-1"
-                        >
-                          {vehicle.label}
-                        </label>
+                    {vehiclesLoading && <div className="flex items-center gap-2 text-xs text-primary py-1"><Loader2 className="h-3 w-3 animate-spin" />Loading...</div>}
+                    {vehiclesError && <div className="flex items-center gap-2 text-xs text-yellow-600 py-1"><WifiOff className="h-3 w-3" />Using mock data</div>}
+                    {vehicleOptions.map(v => (
+                      <div key={v.id} className="flex items-center space-x-2">
+                        <Checkbox id={`v-${v.id}`} checked={selectedVehicles.includes(v.id)} onCheckedChange={() => handleVehicleToggle(v.id)} />
+                        <label htmlFor={`v-${v.id}`} className="text-sm cursor-pointer flex-1">{v.label}</label>
                       </div>
                     ))}
                   </div>
                 </PopoverContent>
               </Popover>
               {selectedVehicles.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-2">
-                  {selectedVehicles.map(vehicleId => {
-                    const v = vehicleOptions.find(o => o.id === vehicleId);
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {selectedVehicles.map(id => {
+                    const v = vehicleOptions.find(o => o.id === id);
                     return (
-                      <Badge key={vehicleId} variant="secondary" className="text-xs">
-                        {v?.label ?? vehicleId}
-                        <X 
-                          className="h-3 w-3 ml-1 cursor-pointer" 
-                          onClick={() => handleVehicleToggle(vehicleId)}
-                        />
+                      <Badge key={id} variant="secondary" className="text-xs">
+                        {v?.vehicle.name ?? id}
+                        <X className="h-3 w-3 ml-1 cursor-pointer" onClick={() => handleVehicleToggle(id)} />
                       </Badge>
                     );
                   })}
@@ -209,51 +377,29 @@ export default function Trips() {
               )}
             </div>
 
+            {/* Status filter */}
             <div className="space-y-2">
-              <Label>Trip Status</Label>
+              <Label>Vehicle Status</Label>
               <Popover open={statusDropdownOpen} onOpenChange={setStatusDropdownOpen}>
                 <PopoverTrigger asChild>
                   <Button variant="outline" className="w-full justify-between">
-                    {selectedStatus.length === 0 ? (
-                      "Select status..."
-                    ) : (
-                      <span className="truncate">
-                        {selectedStatus.length} status selected
-                      </span>
-                    )}
+                    {selectedStatus.length === 0 ? "All statuses" : `${selectedStatus.length} selected`}
                     <ChevronDown className="h-4 w-4 opacity-50 ml-2 flex-shrink-0" />
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-[300px] p-3 bg-background z-50" align="start">
+                <PopoverContent className="w-[280px] p-3 bg-background z-50" align="start">
                   <div className="space-y-2">
                     <div className="flex items-center justify-between mb-2">
-                      <p className="text-sm font-medium">Select Status</p>
-                      {selectedStatus.length > 0 && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-auto p-1 text-xs"
-                          onClick={() => setSelectedStatus([])}
-                        >
-                          Clear all
-                        </Button>
-                      )}
+                      <p className="text-sm font-medium">Status</p>
+                      {selectedStatus.length > 0 && <Button variant="ghost" size="sm" className="h-auto p-1 text-xs" onClick={() => setSelectedStatus([])}>Clear</Button>}
                     </div>
-                    {statusOptions.map(status => {
-                      const Icon = status.icon;
+                    {statusOptions.map(s => {
+                      const Icon = s.icon;
                       return (
-                        <div key={status.id} className="flex items-center space-x-2">
-                          <Checkbox
-                            id={`status-${status.id}`}
-                            checked={selectedStatus.includes(status.id)}
-                            onCheckedChange={() => handleStatusToggle(status.id)}
-                          />
-                          <label 
-                            htmlFor={`status-${status.id}`} 
-                            className="text-sm cursor-pointer flex items-center flex-1"
-                          >
-                            <Icon className="h-4 w-4 mr-2 text-muted-foreground" />
-                            {status.label}
+                        <div key={s.id} className="flex items-center space-x-2">
+                          <Checkbox id={`s-${s.id}`} checked={selectedStatus.includes(s.id)} onCheckedChange={() => handleStatusToggle(s.id)} />
+                          <label htmlFor={`s-${s.id}`} className="text-sm cursor-pointer flex items-center flex-1">
+                            <Icon className="h-4 w-4 mr-2 text-muted-foreground" />{s.label}
                           </label>
                         </div>
                       );
@@ -261,36 +407,16 @@ export default function Trips() {
                   </div>
                 </PopoverContent>
               </Popover>
-              {selectedStatus.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-2">
-                  {selectedStatus.map(statusId => {
-                    const status = statusOptions.find(s => s.id === statusId);
-                    if (!status) return null;
-                    const Icon = status.icon;
-                    return (
-                      <Badge key={statusId} variant="secondary" className="text-xs">
-                        <Icon className="h-3 w-3 mr-1" />
-                        {status.label}
-                        <X 
-                          className="h-3 w-3 ml-1 cursor-pointer" 
-                          onClick={() => handleStatusToggle(statusId)}
-                        />
-                      </Badge>
-                    );
-                  })}
-                </div>
-              )}
             </div>
 
+            {/* Time range */}
             <div className="space-y-2">
               <Label>Time Range</Label>
               <Select value={timeRange} onValueChange={setTimeRange}>
-                <SelectTrigger className="bg-background">
-                  <SelectValue />
-                </SelectTrigger>
+                <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
                 <SelectContent className="bg-background z-50">
-                  <SelectItem value="today">Today</SelectItem>
                   <SelectItem value="hour">Last Hour</SelectItem>
+                  <SelectItem value="today">Today</SelectItem>
                   <SelectItem value="day">Last 24 Hours</SelectItem>
                   <SelectItem value="week">Last Week</SelectItem>
                   <SelectItem value="month">Last Month</SelectItem>
@@ -302,62 +428,34 @@ export default function Trips() {
 
           {timeRange === "custom" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Start Date</Label>
-                <Input type="datetime-local" />
-              </div>
-              <div className="space-y-2">
-                <Label>End Date</Label>
-                <Input type="datetime-local" />
-              </div>
+              <div className="space-y-2"><Label>Start</Label><Input type="datetime-local" value={customFrom} onChange={e => setCustomFrom(e.target.value)} /></div>
+              <div className="space-y-2"><Label>End</Label><Input type="datetime-local" value={customTo} onChange={e => setCustomTo(e.target.value)} /></div>
             </div>
           )}
 
+          {/* Event filters */}
           <div className="space-y-2">
-            <Label>Event Filters</Label>
+            <Label>Event Overlays</Label>
             <Popover open={eventsDropdownOpen} onOpenChange={setEventsDropdownOpen}>
               <PopoverTrigger asChild>
                 <Button variant="outline" className="w-full justify-between">
-                  {selectedEvents.length === 0 ? (
-                    "Select event filters..."
-                  ) : (
-                    <span className="truncate">
-                      {selectedEvents.length} filter(s) selected
-                    </span>
-                  )}
+                  {selectedEvents.length === 0 ? "Select event filters..." : `${selectedEvents.length} filter(s) active`}
                   <ChevronDown className="h-4 w-4 opacity-50 ml-2 flex-shrink-0" />
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-[300px] p-3 bg-background z-50" align="start">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between mb-2">
-                    <p className="text-sm font-medium">Select Filters</p>
-                    {selectedEvents.length > 0 && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-auto p-1 text-xs"
-                        onClick={() => setSelectedEvents([])}
-                      >
-                        Clear all
-                      </Button>
-                    )}
+                    <p className="text-sm font-medium">Event Filters</p>
+                    {selectedEvents.length > 0 && <Button variant="ghost" size="sm" className="h-auto p-1 text-xs" onClick={() => setSelectedEvents([])}>Clear</Button>}
                   </div>
-                  {eventOptions.map(event => {
-                    const Icon = event.icon;
+                  {eventOptions.map(ev => {
+                    const Icon = ev.icon;
                     return (
-                      <div key={event.id} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`event-${event.id}`}
-                          checked={selectedEvents.includes(event.id)}
-                          onCheckedChange={() => handleEventToggle(event.id)}
-                        />
-                        <label 
-                          htmlFor={`event-${event.id}`} 
-                          className="text-sm cursor-pointer flex items-center flex-1"
-                        >
-                          <Icon className="h-4 w-4 mr-2 text-muted-foreground" />
-                          {event.label}
+                      <div key={ev.id} className="flex items-center space-x-2">
+                        <Checkbox id={`ev-${ev.id}`} checked={selectedEvents.includes(ev.id)} onCheckedChange={() => handleEventToggle(ev.id)} />
+                        <label htmlFor={`ev-${ev.id}`} className="text-sm cursor-pointer flex items-center flex-1">
+                          <Icon className="h-4 w-4 mr-2 text-muted-foreground" />{ev.label}
                         </label>
                       </div>
                     );
@@ -366,19 +464,15 @@ export default function Trips() {
               </PopoverContent>
             </Popover>
             {selectedEvents.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-2">
-                {selectedEvents.map(eventId => {
-                  const event = eventOptions.find(e => e.id === eventId);
-                  if (!event) return null;
-                  const Icon = event.icon;
+              <div className="flex flex-wrap gap-1 mt-1">
+                {selectedEvents.map(id => {
+                  const ev = eventOptions.find(e => e.id === id);
+                  if (!ev) return null;
+                  const Icon = ev.icon;
                   return (
-                    <Badge key={eventId} variant="secondary" className="text-xs">
-                      <Icon className="h-3 w-3 mr-1" />
-                      {event.label}
-                      <X 
-                        className="h-3 w-3 ml-1 cursor-pointer" 
-                        onClick={() => handleEventToggle(eventId)}
-                      />
+                    <Badge key={id} variant="secondary" className="text-xs">
+                      <Icon className="h-3 w-3 mr-1" />{ev.label}
+                      <X className="h-3 w-3 ml-1 cursor-pointer" onClick={() => handleEventToggle(id)} />
                     </Badge>
                   );
                 })}
@@ -388,277 +482,258 @@ export default function Trips() {
         </CardContent>
       </Card>
 
-      {/* Content based on selected view */}
-      <div className="space-y-4">
-        {/* Active Trips */}
-        {currentView === "active" && (
-          <div className="space-y-4">
+      {/* ── ACTIVE TRIPS ── */}
+      {currentView === "active" && (
+        <div className="space-y-4">
+          {activeTrips.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                <Navigation className="h-10 w-10 mb-3" />
+                <p className="font-medium">No active trips</p>
+                <p className="text-sm">No vehicles are currently online or moving.</p>
+              </CardContent>
+            </Card>
+          ) : (
             <div className="grid gap-4">
-              {activeTrips.map(trip => (
-                <Card key={trip.id}>
+              {activeTrips.map(v => (
+                <Card key={v.id}>
                   <CardHeader>
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
                       <div>
-                        <CardTitle className="text-lg">{trip.vehicle} - {trip.driver}</CardTitle>
-                        <CardDescription>{trip.origin} → {trip.destination}</CardDescription>
+                        <CardTitle className="text-lg">{v.name}</CardTitle>
+                        <CardDescription>{v.plateNumber} · Driver: {v.driver}</CardDescription>
                       </div>
-                      <Badge className="bg-green-500">{trip.status}</Badge>
+                      <div className="flex items-center gap-2">
+                        {(() => {
+                          const eff = v.motion ? "online" : v.status;
+                          const color = eff === "online" ? "bg-green-500" : eff === "idle" ? "bg-yellow-500" : "bg-red-500";
+                          const label = v.motion ? "Active" : v.status;
+                          return <Badge className={color}>{label}</Badge>;
+                        })()}
+                        {v.motion && <Badge variant="outline" className="text-xs">Moving</Badge>}
+                      </div>
                     </div>
                   </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Progress: {trip.progress}%</span>
-                      <span className="font-medium">ETA: {trip.eta}</span>
+                  <CardContent className="px-3 sm:px-6">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm mb-3">
+                      <div className="flex items-center gap-2">
+                        <Gauge className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        <div><p className="text-muted-foreground text-xs">Speed</p><p className="font-medium">{(v.speed * 1.852).toFixed(0)} km/h</p></div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Route className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        <div><p className="text-muted-foreground text-xs">Trip Odo</p><p className="font-medium">{v.tripOdometer?.toFixed(1) ?? "—"} km</p></div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Fuel className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        <div><p className="text-muted-foreground text-xs">Fuel</p><p className="font-medium">{v.fuelLevel}%</p></div>
+                      </div>
+                      <div className="flex items-center gap-2 col-span-2 sm:col-span-1">
+                        <MapPin className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        <div className="min-w-0"><p className="text-muted-foreground text-xs">Location</p><p className="font-medium truncate text-xs">{v.location.address || `${v.location.lat.toFixed(4)}, ${v.location.lng.toFixed(4)}`}</p></div>
+                      </div>
                     </div>
-                    <div className="w-full bg-muted rounded-full h-2">
-                      <div className="bg-primary h-2 rounded-full transition-all" style={{ width: `${trip.progress}%` }} />
-                    </div>
-                    <div className="flex gap-2">
-                      <Button size="sm" variant="outline">
-                        <User className="h-4 w-4 mr-2" />
-                        Contact Driver
+                    <Separator className="mb-3" />
+                    <div className="flex gap-2 flex-wrap">
+                      <Button size="sm" variant="outline" onClick={() => toast.info(`Calling driver: ${v.driver}`)} title="Contact Driver">
+                        <User className="h-4 w-4 sm:mr-2" />
+                        <span className="hidden sm:inline">Contact Driver</span>
                       </Button>
-                      <Button size="sm" variant="outline">
-                        <MapPin className="h-4 w-4 mr-2" />
-                        Track Live
-                      </Button>
-                      <Button size="sm" variant="outline">
-                        <FileText className="h-4 w-4 mr-2" />
-                        View Details
+                      <Button size="sm" variant="outline" onClick={() => navigate("/fleet", { state: { trackVehicleId: v.id } })} title="Track Live">
+                        <MapPin className="h-4 w-4 sm:mr-2" />
+                        <span className="hidden sm:inline">Track Live</span>
                       </Button>
                     </div>
                   </CardContent>
                 </Card>
               ))}
             </div>
-          </div>
-        )}
+          )}
+        </div>
+      )}
 
-        {/* Trip History */}
-        {currentView === "history" && (
-          <div className="space-y-4">
-            <div className="grid gap-4">
-            {tripHistory.map(trip => (
-              <Card key={trip.id}>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle className="text-lg">{trip.vehicle} - {trip.driver}</CardTitle>
-                      <CardDescription>{trip.date}</CardDescription>
-                    </div>
-                    <Dialog>
-                      <DialogTrigger asChild>
-                        <Button variant="outline" size="sm" onClick={() => setSelectedTrip(trip.id)}>
-                          <FileText className="h-4 w-4 mr-2" />
-                          View Details
-                        </Button>
-                      </DialogTrigger>
-                      <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
-                        <DialogHeader>
-                          <DialogTitle>Trip Details - {trip.id}</DialogTitle>
-                          <DialogDescription>Complete trip information and historical route</DialogDescription>
-                        </DialogHeader>
-                        
-                        <div className="space-y-6">
-                          {/* Trip Summary */}
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div>
-                              <p className="text-sm text-muted-foreground">Duration</p>
-                              <p className="font-semibold">{trip.duration}</p>
-                            </div>
-                            <div>
-                              <p className="text-sm text-muted-foreground">Distance</p>
-                              <p className="font-semibold">{trip.distance}</p>
-                            </div>
-                            <div>
-                              <p className="text-sm text-muted-foreground">Stops</p>
-                              <p className="font-semibold">{trip.stops}</p>
-                            </div>
-                            <div>
-                              <p className="text-sm text-muted-foreground">Avg Speed</p>
-                              <p className="font-semibold">{trip.avgSpeed}</p>
-                            </div>
+      {/* ── TRIP HISTORY ── */}
+      {currentView === "history" && (
+        <div className="space-y-4">
+          {historyLoading && (
+            <Card>
+              <CardContent className="flex items-center justify-center gap-3 py-10 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span>Loading position history…</span>
+              </CardContent>
+            </Card>
+          )}
+
+          {!historyLoading && filteredTrips.length === 0 && (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                <History className="h-10 w-10 mb-3" />
+                <p className="font-medium">No trip history found</p>
+                <p className="text-sm">Try selecting a longer time range or different vehicles.</p>
+              </CardContent>
+            </Card>
+          )}
+
+          {!historyLoading && filteredTrips.map((trip, idx) => (
+            <Card key={idx}>
+              <CardHeader>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <CardTitle className="text-base">{trip.vehicleName} <span className="text-muted-foreground font-normal text-sm">· {trip.plateNumber}</span></CardTitle>
+                    <CardDescription>
+                      {format(new Date(trip.startTime), "MMM d, yyyy HH:mm")} → {format(new Date(trip.endTime), "HH:mm")}
+                      {trip.driver && <span className="ml-2">· {trip.driver}</span>}
+                    </CardDescription>
+                  </div>
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <Button variant="outline" size="sm">
+                        <FileText className="h-4 w-4 mr-2" />View Route
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="w-[95vw] max-w-3xl max-h-[90vh] overflow-y-auto">
+                      <DialogHeader>
+                        <DialogTitle className="text-base">{trip.vehicleName} — Trip Route</DialogTitle>
+                        <DialogDescription>
+                          {format(new Date(trip.startTime), "MMM d, yyyy HH:mm")} → {format(new Date(trip.endTime), "HH:mm")}
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-2 text-sm">
+                          <div className="p-3 rounded-lg border"><p className="text-muted-foreground text-xs">Duration</p><p className="font-semibold">{trip.durationMin >= 60 ? `${(trip.durationMin / 60).toFixed(1)}h` : `${trip.durationMin.toFixed(0)}m`}</p></div>
+                          <div className="p-3 rounded-lg border"><p className="text-muted-foreground text-xs">Distance</p><p className="font-semibold">{trip.distanceKm.toFixed(2)} km</p></div>
+                          <div className="p-3 rounded-lg border"><p className="text-muted-foreground text-xs">Avg Speed</p><p className="font-semibold">{trip.avgSpeedKmh.toFixed(1)} km/h</p></div>
+                          <div className="p-3 rounded-lg border"><p className="text-muted-foreground text-xs">Max Speed</p><p className="font-semibold">{trip.maxSpeedKmh.toFixed(1)} km/h</p></div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                          <div className="p-3 rounded-lg border"><p className="text-muted-foreground text-xs">Stops detected</p><p className="font-semibold">{trip.stopCount}</p></div>
+                          <div className="p-3 rounded-lg border"><p className="text-muted-foreground text-xs">Position points</p><p className="font-semibold">{trip.positions.length}</p></div>
+                        </div>
+                        {selectedEvents.includes("overspeeding") && trip.maxSpeedKmh > 80 && (
+                          <div className="flex items-center gap-2 p-3 border border-yellow-500/30 rounded-lg bg-yellow-500/5">
+                            <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                            <div><p className="text-sm font-medium">Overspeed detected</p><p className="text-xs text-muted-foreground">Max: {trip.maxSpeedKmh.toFixed(1)} km/h</p></div>
                           </div>
-
-                          {/* Historical Route Map Placeholder */}
-                          <div className="border rounded-lg p-6 bg-muted/20">
-                            <div className="flex items-center justify-center h-64 text-muted-foreground">
-                              <div className="text-center">
-                                <MapPin className="h-12 w-12 mx-auto mb-2" />
-                                <p>Historical Route Map</p>
-                                <p className="text-sm">Route visualization will appear here</p>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Time Range Selection for History */}
-                          <div>
-                            <Label>View Route By</Label>
-                            <Select defaultValue="day">
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="hour">Hourly</SelectItem>
-                                <SelectItem value="day">Daily</SelectItem>
-                                <SelectItem value="week">Weekly</SelectItem>
-                                <SelectItem value="month">Monthly</SelectItem>
-                                <SelectItem value="custom">Custom Range</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          {/* Share Options */}
-                          <div className="space-y-2">
-                            <Label>Share Trip History</Label>
-                            <div className="flex gap-2">
-                              <Button variant="outline" size="sm" onClick={() => handleShareTrip("Email")}>
-                                <Mail className="h-4 w-4 mr-2" />
-                                Email
-                              </Button>
-                              <Button variant="outline" size="sm" onClick={() => handleShareTrip("SMS")}>
-                                <MessageSquare className="h-4 w-4 mr-2" />
-                                SMS
-                              </Button>
-                              <Button variant="outline" size="sm" onClick={() => handleShareTrip("Push")}>
-                                <Bell className="h-4 w-4 mr-2" />
-                                Push
-                              </Button>
-                              <Button variant="outline" size="sm" onClick={() => {
-                                navigator.clipboard.writeText(window.location.href);
-                                toast.success("Link copied to clipboard");
-                              }}>
-                                <Share2 className="h-4 w-4 mr-2" />
-                                Copy Link
-                              </Button>
-                            </div>
-                          </div>
-
-                          {/* Alerts in Duration */}
-                          {trip.alerts > 0 && (
-                            <div className="space-y-2">
-                              <Label>Alerts ({trip.alerts})</Label>
-                              <div className="space-y-2">
-                                <div className="flex items-center gap-2 p-2 border rounded-lg">
-                                  <AlertTriangle className="h-4 w-4 text-yellow-500" />
-                                  <div className="flex-1">
-                                    <p className="text-sm font-medium">Overspeeding Detected</p>
-                                    <p className="text-xs text-muted-foreground">Speed: 95 km/h at 10:30 AM</p>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Media Files */}
-                          <div className="space-y-2">
-                            <Label>Media Files</Label>
-                            <div className="grid grid-cols-3 gap-2">
-                              <div className="border rounded-lg p-4 text-center hover:bg-accent cursor-pointer">
-                                <Camera className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                                <p className="text-xs">Camera 1</p>
-                                <p className="text-xs text-muted-foreground">10:15 AM</p>
-                              </div>
-                              <div className="border rounded-lg p-4 text-center hover:bg-accent cursor-pointer">
-                                <Camera className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                                <p className="text-xs">Camera 2</p>
-                                <p className="text-xs text-muted-foreground">11:30 AM</p>
-                              </div>
-                              <div className="border rounded-lg p-4 text-center hover:bg-accent cursor-pointer">
-                                <Camera className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                                <p className="text-xs">Camera 3</p>
-                                <p className="text-xs text-muted-foreground">02:45 PM</p>
-                              </div>
-                            </div>
+                        )}
+                        <RouteMap positions={trip.positions} />
+                        <Separator />
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium">Share Trip</Label>
+                          <div className="flex gap-2 flex-wrap">
+                            <Button variant="outline" size="sm" onClick={() => handleShareTrip("Email")}><Mail className="h-4 w-4 mr-2" />Email</Button>
+                            <Button variant="outline" size="sm" onClick={() => handleShareTrip("SMS")}><MessageSquare className="h-4 w-4 mr-2" />SMS</Button>
+                            <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(window.location.href); toast.success("Link copied"); }}>
+                              <Share2 className="h-4 w-4 mr-2" />Copy Link
+                            </Button>
                           </div>
                         </div>
-                      </DialogContent>
-                    </Dialog>
-                  </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+              </CardHeader>
+              <CardContent className="px-3 sm:px-6">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-3 text-sm">
+                  <div><p className="text-muted-foreground text-xs">Duration</p><p className="font-medium">{trip.durationMin >= 60 ? `${(trip.durationMin / 60).toFixed(1)}h` : `${trip.durationMin.toFixed(0)}m`}</p></div>
+                  <div><p className="text-muted-foreground text-xs">Distance</p><p className="font-medium">{trip.distanceKm.toFixed(2)} km</p></div>
+                  <div><p className="text-muted-foreground text-xs">Avg Speed</p><p className="font-medium">{trip.avgSpeedKmh.toFixed(1)} km/h</p></div>
+                  <div><p className="text-muted-foreground text-xs">Max Speed</p><p className="font-medium">{trip.maxSpeedKmh.toFixed(1)} km/h</p></div>
+                  <div><p className="text-muted-foreground text-xs">Stops</p><p className="font-medium">{trip.stopCount}</p></div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* ── TRIP ANALYTICS ── */}
+      {currentView === "analytics" && (
+        <div className="space-y-4">
+          {/* KPI cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Card>
+              <CardHeader className="pb-2 px-3 sm:px-6 pt-3 sm:pt-6"><CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Total Trips</CardTitle></CardHeader>
+              <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6"><div className="text-2xl sm:text-3xl font-bold">{historyLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : totalTrips}</div><p className="text-xs text-muted-foreground mt-1">in selected period</p></CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2 px-3 sm:px-6 pt-3 sm:pt-6"><CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Total Distance</CardTitle></CardHeader>
+              <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6"><div className="text-2xl sm:text-3xl font-bold">{historyLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : `${totalDistance.toFixed(0)} km`}</div><p className="text-xs text-muted-foreground mt-1">across all vehicles</p></CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2 px-3 sm:px-6 pt-3 sm:pt-6"><CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Avg Speed</CardTitle></CardHeader>
+              <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6"><div className="text-2xl sm:text-3xl font-bold">{historyLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : `${avgSpeed.toFixed(1)} km/h`}</div><p className="text-xs text-muted-foreground mt-1">fleet average</p></CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2 px-3 sm:px-6 pt-3 sm:pt-6"><CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Active Now</CardTitle></CardHeader>
+              <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6"><div className="text-2xl sm:text-3xl font-bold">{activeTrips.length}</div><p className="text-xs text-muted-foreground mt-1">vehicles moving</p></CardContent>
+            </Card>
+          </div>
+
+          {historyLoading ? (
+            <Card><CardContent className="flex items-center justify-center gap-3 py-12 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /><span>Loading analytics…</span></CardContent></Card>
+          ) : analyticsData.length === 0 ? (
+            <Card><CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground"><BarChart3 className="h-10 w-10 mb-3" /><p>No data for selected range</p></CardContent></Card>
+          ) : (
+            <>
+              <Card>
+                <CardHeader className="pb-3 px-3 sm:px-6">
+                  <CardTitle className="text-base">Distance per Vehicle</CardTitle>
+                  <CardDescription>Total km driven in the selected period</CardDescription>
                 </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
-                    <div>
-                      <p className="text-muted-foreground">Duration</p>
-                      <p className="font-medium">{trip.duration}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Distance</p>
-                      <p className="font-medium">{trip.distance}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Stops</p>
-                      <p className="font-medium">{trip.stops}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Alerts</p>
-                      <p className="font-medium">{trip.alerts}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Avg Speed</p>
-                      <p className="font-medium">{trip.avgSpeed}</p>
-                    </div>
-                  </div>
+                <CardContent className="px-2 sm:px-6">
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={analyticsData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                      <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                      <YAxis tick={{ fontSize: 12 }} unit=" km" />
+                      <Tooltip formatter={(v: number) => [`${v} km`, "Distance"]} />
+                      <Bar dataKey="distance" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </CardContent>
               </Card>
-            ))}
-          </div>
-          </div>
-        )}
 
-        {/* Trip Analytics */}
-        {currentView === "analytics" && (
-          <div className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-3">
-            <Card>
-              <CardHeader>
-                <CardTitle>Total Trips</CardTitle>
-                <CardDescription>Last 30 days</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold">124</div>
-                <p className="text-sm text-green-500">+12% from last month</p>
-              </CardContent>
-            </Card>
+              <Card>
+                <CardHeader className="pb-3 px-3 sm:px-6">
+                  <CardTitle className="text-base">Average Speed per Vehicle</CardTitle>
+                  <CardDescription>Fleet speed profile</CardDescription>
+                </CardHeader>
+                <CardContent className="px-2 sm:px-6">
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={analyticsData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                      <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                      <YAxis tick={{ fontSize: 12 }} unit=" km/h" />
+                      <Tooltip formatter={(v: number) => [`${v} km/h`, "Avg Speed"]} />
+                      <Legend />
+                      <Bar dataKey="avgSpeed" name="Avg Speed" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Total Distance</CardTitle>
-                <CardDescription>Last 30 days</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold">15,240 km</div>
-                <p className="text-sm text-green-500">+8% from last month</p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Avg Efficiency</CardTitle>
-                <CardDescription>Last 30 days</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold">87%</div>
-                <p className="text-sm text-yellow-500">-2% from last month</p>
-              </CardContent>
-            </Card>
-          </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Performance Metrics</CardTitle>
-              <CardDescription>Detailed trip analytics and insights</CardDescription>
-            </CardHeader>
-            <CardContent className="h-64 flex items-center justify-center text-muted-foreground">
-              <div className="text-center">
-                <BarChart3 className="h-12 w-12 mx-auto mb-2" />
-                <p>Analytics charts will appear here</p>
-              </div>
-            </CardContent>
-          </Card>
-          </div>
-        )}
-      </div>
+              <Card>
+                <CardHeader className="pb-3 px-3 sm:px-6">
+                  <CardTitle className="text-base">Trips per Vehicle</CardTitle>
+                  <CardDescription>Number of trip segments detected</CardDescription>
+                </CardHeader>
+                <CardContent className="px-2 sm:px-6">
+                  <ResponsiveContainer width="100%" height={180}>
+                    <BarChart data={analyticsData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                      <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                      <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                      <Tooltip formatter={(v: number) => [v, "Trips"]} />
+                      <Bar dataKey="trips" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
+    </div>
     </div>
   );
 }

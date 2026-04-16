@@ -221,8 +221,9 @@ export default function GeofenceManager() {
     if (!map.current || geofences.length === 0) return;
     const avgLng = geofences.reduce((s, g) => s + g.center_lng, 0) / geofences.length;
     const avgLat = geofences.reduce((s, g) => s + g.center_lat, 0) / geofences.length;
+    if (!isFinite(avgLat) || !isFinite(avgLng) || avgLat < -90 || avgLat > 90 || avgLng < -180 || avgLng > 180) return;
     map.current.flyTo({ center: [avgLng, avgLat], zoom: 11, duration: 1000 });
-  }, [geofences.length]);
+  }, [geofences.length, styleLoaded]);
 
   // Handle map clicks for creation
   useEffect(() => {
@@ -264,6 +265,11 @@ export default function GeofenceManager() {
       // Draw each active geofence as a circle
       geofences.forEach((gf, i) => {
         if (!gf.is_active) return;
+        if (
+          !isFinite(gf.center_lat) || !isFinite(gf.center_lng) ||
+          gf.center_lat < -90 || gf.center_lat > 90 ||
+          gf.center_lng < -180 || gf.center_lng > 180
+        ) return;
 
         const circle = createGeoJSONCircle([gf.center_lng, gf.center_lat], gf.radius_meters);
         m.addSource(`geofence-src-${i}`, { type: 'geojson', data: circle as any });
@@ -329,21 +335,21 @@ export default function GeofenceManager() {
   };
 
   return (
-    <div className="flex gap-4 h-[600px]">
+    <div className="flex flex-col lg:flex-row gap-4">
       {/* Map */}
-      <div className="flex-1 rounded-lg overflow-hidden border border-border relative">
+      <div className="w-full lg:flex-1 rounded-lg overflow-hidden border border-border relative h-[50vw] min-h-[260px] max-h-[420px] lg:h-[600px] lg:max-h-none">
         <div ref={mapContainer} className="w-full h-full" />
 
         {isCreating && !clickedPoint && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 bg-card border border-border rounded-lg px-4 py-2 shadow-lg flex items-center gap-2">
-            <Crosshair className="h-4 w-4 text-primary animate-pulse" />
-            <span className="text-sm font-medium text-foreground">Click on the map to place geofence center</span>
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 bg-card border border-border rounded-lg px-3 py-2 shadow-lg flex items-center gap-2 max-w-[90%]">
+            <Crosshair className="h-4 w-4 text-primary animate-pulse flex-shrink-0" />
+            <span className="text-xs sm:text-sm font-medium text-foreground">Click on the map to place geofence center</span>
           </div>
         )}
       </div>
 
       {/* Sidebar panel */}
-      <div className="w-80 flex-shrink-0 flex flex-col gap-3 overflow-y-auto">
+      <div className="w-full lg:w-80 lg:flex-shrink-0 flex flex-col gap-3 overflow-y-auto lg:max-h-[600px]">
         {/* Create button / form */}
         {!isCreating ? (
           <Button onClick={() => setIsCreating(true)} className="w-full">

@@ -118,7 +118,7 @@ const NotificationBell = () => {
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-xs h-7 px-2 text-primary hover:text-primary"
+                className="text-xs h-7 px-2 text-primary"
                 onClick={markAllRead}
               >
                 Mark all read
