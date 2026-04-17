@@ -24,20 +24,19 @@ const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string;
 
 const COLORS = ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316'];
 
-// Traccar stores geofence area as WKT: "CIRCLE (lng lat, radius)"
+// Traccar stores geofence area as WKT: "CIRCLE (lat lng, radius)"
 function toWKT(lng: number, lat: number, radiusMeters: number): string {
-  return `CIRCLE (${lng} ${lat}, ${radiusMeters})`;
+  return `CIRCLE (${lat} ${lng}, ${radiusMeters})`;
 }
 
-function parseWKT(area: string): { lng: number; lat: number; radius: number } | null {
-  // CIRCLE (lng lat, radius)
+function parseWKT(area: string): { lng: number; lat: number; radius: number; polygonCoords?: [number, number][] } | null {
+  // CIRCLE (lat lng, radius)  ← Traccar uses lat lng order
   const circle = area.match(/CIRCLE\s*\(\s*([\d.-]+)\s+([\d.-]+)\s*,\s*([\d.]+)\s*\)/i);
   if (circle) {
-    return { lng: parseFloat(circle[1]), lat: parseFloat(circle[2]), radius: parseFloat(circle[3]) };
+    return { lat: parseFloat(circle[1]), lng: parseFloat(circle[2]), radius: parseFloat(circle[3]) };
   }
 
-  // POLYGON ((lat lng, ...)) or LINESTRING (lat lng, ...)
-  // Traccar WKT uses "lat lng" order in coordinates
+  // POLYGON ((lat lng, ...)) or LINESTRING (lat lng, ...)  ← Traccar uses lat lng order
   const coordStr = area.match(/\(+([^()]+)\)+/);
   if (!coordStr) return null;
   const pairs = coordStr[1].trim().split(',').map(s => {
@@ -58,7 +57,16 @@ function parseWKT(area: string): { lng: number; lat: number; radius: number } | 
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }), 100);
 
-  return { lat: avgLat, lng: avgLng, radius };
+  // Store the actual polygon ring as [lng, lat] pairs for GeoJSON rendering
+  const polygonCoords: [number, number][] = pairs.map(p => [p.lng, p.lat]);
+  // Close the ring if not already closed
+  if (polygonCoords.length > 0) {
+    const first = polygonCoords[0];
+    const last = polygonCoords[polygonCoords.length - 1];
+    if (first[0] !== last[0] || first[1] !== last[1]) polygonCoords.push(first);
+  }
+
+  return { lat: avgLat, lng: avgLng, radius, polygonCoords };
 }
 
 // UI-friendly geofence derived from TraccarGeofence
@@ -71,6 +79,7 @@ interface Geofence {
   radius_meters: number;
   color: string;
   is_active: boolean;
+  polygonCoords?: [number, number][];
 }
 
 function toUIGeofence(gf: TraccarGeofence, index: number): Geofence | null {
@@ -85,6 +94,7 @@ function toUIGeofence(gf: TraccarGeofence, index: number): Geofence | null {
     radius_meters: parsed.radius,
     color: (gf.attributes?.color as string) ?? COLORS[index % COLORS.length],
     is_active: (gf.attributes?.is_active as boolean) ?? true,
+    polygonCoords: parsed.polygonCoords,
   };
 }
 
@@ -206,8 +216,8 @@ export default function GeofenceManager() {
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
       style: 'mapbox://styles/mapbox/streets-v12',
-      center: [0, 20],
-      zoom: 2,
+      center: [-121.94739103273606, 37.22445667850576],
+      zoom: 10,
     });
 
     map.current.addControl(new mapboxgl.NavigationControl(), 'top-right');
@@ -216,12 +226,15 @@ export default function GeofenceManager() {
     return () => { map.current?.remove(); };
   }, []);
 
-  // Fly to geofences centroid once loaded
+  const hasFitToGeofences = useRef(false);
+
+  // Fly to geofences centroid once on first load
   useEffect(() => {
-    if (!map.current || geofences.length === 0) return;
+    if (!map.current || !styleLoaded || geofences.length === 0 || hasFitToGeofences.current) return;
     const avgLng = geofences.reduce((s, g) => s + g.center_lng, 0) / geofences.length;
     const avgLat = geofences.reduce((s, g) => s + g.center_lat, 0) / geofences.length;
     if (!isFinite(avgLat) || !isFinite(avgLng) || avgLat < -90 || avgLat > 90 || avgLng < -180 || avgLng > 180) return;
+    hasFitToGeofences.current = true;
     map.current.flyTo({ center: [avgLng, avgLat], zoom: 11, duration: 1000 });
   }, [geofences.length, styleLoaded]);
 
@@ -271,8 +284,14 @@ export default function GeofenceManager() {
           gf.center_lng < -180 || gf.center_lng > 180
         ) return;
 
-        const circle = createGeoJSONCircle([gf.center_lng, gf.center_lat], gf.radius_meters);
-        m.addSource(`geofence-src-${i}`, { type: 'geojson', data: circle as any });
+        const shapeGeoJSON = gf.polygonCoords && gf.polygonCoords.length >= 3
+          ? {
+              type: 'Feature' as const,
+              geometry: { type: 'Polygon' as const, coordinates: [gf.polygonCoords] },
+              properties: {},
+            }
+          : createGeoJSONCircle([gf.center_lng, gf.center_lat], gf.radius_meters);
+        m.addSource(`geofence-src-${i}`, { type: 'geojson', data: shapeGeoJSON as any });
         m.addLayer({
           id: `geofence-fill-${i}`,
           type: 'fill',
@@ -405,7 +424,7 @@ export default function GeofenceManager() {
 
             {clickedPoint && (
               <p className="text-xs text-muted-foreground">
-                📍 {clickedPoint[1].toFixed(5)}, {clickedPoint[0].toFixed(5)}
+                {clickedPoint[1].toFixed(5)}, {clickedPoint[0].toFixed(5)}
               </p>
             )}
 

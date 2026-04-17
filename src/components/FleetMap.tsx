@@ -56,12 +56,13 @@ const FleetMap = ({ vehicles, selectedVehicle, onSelectVehicle, onClearSelection
     if (!mapContainer.current || !apiToken) return;
 
     mapboxgl.accessToken = apiToken;
+    const center: [number, number] = [-121.928575, 37.241800833333336];
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
       style: 'mapbox://styles/mapbox/streets-v12',
-      center: [-73.9776, 40.7580],
-      zoom: 12,
+      center: center,
+      zoom: 18,
       pitch: 45,
     });
 
