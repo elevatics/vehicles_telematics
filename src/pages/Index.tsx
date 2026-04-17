@@ -111,7 +111,7 @@ const Index = () => {
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
           className={cn(
-            "absolute top-1/2 -translate-y-1/2 -left-5 z-30",
+            "absolute top-1/2 -translate-y-1/2 -left-5 z-10",
             "w-5 h-14 flex items-center justify-center",
             "bg-card border border-border border-r-0 rounded-l-md",
             "hover:bg-accent transition-colors cursor-pointer",
